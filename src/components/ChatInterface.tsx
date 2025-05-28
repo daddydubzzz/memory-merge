@@ -90,43 +90,98 @@ export default function ChatInterface({ accountId }: ChatInterfaceProps) {
       
       const processedQuery = await processResponse.json();
       
-      if (processedQuery.intent === 'store' || processedQuery.intent === 'update') {
-        // Store new information or update existing information
-        await knowledgeService.addKnowledge({
-          content: processedQuery.content,
-          tags: processedQuery.tags,
-          addedBy: user.uid,
-          // Pass revision fields for updates
-          intent: processedQuery.intent,
-          replaces: processedQuery.replaces,
-          timestamp: processedQuery.timestamp || new Date().toISOString()
-        });
+      if (processedQuery.intent === 'store' || processedQuery.intent === 'update' || processedQuery.intent === 'purchase' || processedQuery.intent === 'clear_list') {
+        // Handle shopping list operations
+        if (processedQuery.intent === 'purchase') {
+          // Mark items as purchased (remove from shopping list)
+          await knowledgeService.handleItemPurchase(processedQuery.items || [], processedQuery.tags);
+          
+          const items = processedQuery.items || [];
+          const botMessage: Message = {
+            id: (Date.now() + 1).toString(),
+            content: `Perfect! I've marked ${items.join(', ')} as purchased and removed them from your shopping list. You'll be able to find this purchase record easily whenever you need it.`,
+            isUser: false,
+            timestamp: new Date(),
+            suggestions: [
+              "What else do I need from the store?",
+              "Show me my shopping list",
+              "Add more items to my list"
+            ]
+          };
+          setMessages(prev => [...prev, botMessage]);
+          
+        } else if (processedQuery.intent === 'clear_list') {
+          // Clear entire list
+          await knowledgeService.clearShoppingList(processedQuery.listType || 'shopping');
+          
+          const listType = processedQuery.listType || 'shopping';
+          const botMessage: Message = {
+            id: (Date.now() + 1).toString(),
+            content: `Perfect! I've cleared your ${listType} list. All items have been marked as inactive. You can start fresh with new items anytime!`,
+            isUser: false,
+            timestamp: new Date(),
+            suggestions: [
+              "Add new items to my list",
+              "Show me what I purchased recently",
+              "Help me plan my next shopping trip"
+            ]
+          };
+          setMessages(prev => [...prev, botMessage]);
+          
+        } else {
+          // Store new information or update existing information (original logic)
+          await knowledgeService.addKnowledge({
+            content: processedQuery.content,
+            tags: processedQuery.tags,
+            addedBy: user.uid,
+            // Pass revision fields for updates
+            intent: processedQuery.intent,
+            replaces: processedQuery.replaces,
+            timestamp: processedQuery.timestamp || new Date().toISOString(),
+            // Pass shopping fields if present
+            items: processedQuery.items,
+            listType: processedQuery.listType
+          });
 
-        const isUpdate = processedQuery.intent === 'update';
-        const actionWord = isUpdate ? 'updated' : 'saved';
-        const updateNote = isUpdate && processedQuery.replaces 
-          ? ` (replacing previous ${processedQuery.replaces} information)` 
-          : '';
+          const isUpdate = processedQuery.intent === 'update';
+          const actionWord = isUpdate ? 'updated' : 'saved';
+          const updateNote = isUpdate && processedQuery.replaces 
+            ? ` (replacing previous ${processedQuery.replaces} information)` 
+            : '';
 
-        const botMessage: Message = {
-          id: (Date.now() + 1).toString(),
-          content: `Perfect! I've ${actionWord} "${processedQuery.content}" with tags: ${processedQuery.tags.map((tag: string) => `#${tag}`).join(', ')}${updateNote}. You'll be able to find it easily whenever you need it.`,
-          isUser: false,
-          timestamp: new Date(),
-          suggestions: [
-            "What else can I help you store?",
-            "Show me recent entries",
-            "Tell me about my stored information"
-          ]
-        };
+          const botMessage: Message = {
+            id: (Date.now() + 1).toString(),
+            content: `Perfect! I've ${actionWord} "${processedQuery.content}" with tags: ${processedQuery.tags.map((tag: string) => `#${tag}`).join(', ')}${updateNote}. You'll be able to find it easily whenever you need it.`,
+            isUser: false,
+            timestamp: new Date(),
+            suggestions: [
+              "What else can I help you store?",
+              "Show me recent entries",
+              "Tell me about my stored information"
+            ]
+          };
 
-        setMessages(prev => [...prev, botMessage]);
+          setMessages(prev => [...prev, botMessage]);
+        }
       } else {
         // Search for existing information using tags if available
-        const searchResults = await knowledgeService.searchKnowledge(
-          processedQuery.searchTerms,
-          processedQuery.tags.length > 0 ? processedQuery.tags : undefined
-        );
+        let searchResults: KnowledgeEntry[] = [];
+        
+        // Special handling for shopping list queries
+        const isShoppingQuery = processedQuery.tags.some((tag: string) => ['shopping', 'groceries'].includes(tag)) && 
+                               processedQuery.intent === 'retrieve';
+        
+        if (isShoppingQuery) {
+          // Use specialized shopping list method for accurate results
+          console.log('🛍️ Detected shopping list query, using getActiveShoppingList');
+          searchResults = await knowledgeService.getActiveShoppingList();
+        } else {
+          // Use general search for other queries
+          searchResults = await knowledgeService.searchKnowledge(
+            processedQuery.searchTerms,
+            processedQuery.tags.length > 0 ? processedQuery.tags : undefined
+          );
+        }
 
         // Generate response using OpenAI via API
         const generateResponse = await fetch('/api/ai/process', {

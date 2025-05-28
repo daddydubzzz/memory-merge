@@ -64,7 +64,7 @@ export const CATEGORY_TO_TAGS_MAP: Record<string, string[]> = {
 
 export type LegacyKnowledgeCategory = typeof LEGACY_CATEGORIES[number];
 
-// Updated knowledge entry interface (tags-based) with revision support
+// Updated knowledge entry interface (tags-based) with revision and shopping support
 export interface KnowledgeEntry {
   id?: string;
   content: string;
@@ -77,5 +77,8 @@ export interface KnowledgeEntry {
   timestamp?: string;          // ISO 8601 string (e.g., "2025-05-28T14:03:00Z")
   replaces?: string;          // (Optional) Tag or ID of memory being replaced
   replaced_by?: string;       // (Optional) Timestamp or ID of memory that superseded this one
-  intent?: "create" | "update" | "delete";  // Defaults to "create" if not specified
+  intent?: "create" | "update" | "delete" | "purchase" | "clear_list";  // Defaults to "create" if not specified
+  // New shopping list fields
+  items?: string[];           // Individual items for shopping lists
+  listType?: string;          // e.g., "shopping", "grocery", "todo"
 } 

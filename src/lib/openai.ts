@@ -13,16 +13,19 @@ function createOpenAIClient() {
 // Export interfaces from constants
 export type { KnowledgeEntry } from './constants';
 
-// Updated Zod schemas for tag-based validation with revision support
+// Updated Zod schemas for tag-based validation with revision and shopping support
 const ProcessedQuerySchema = z.object({
-  intent: z.enum(['store', 'retrieve', 'update', 'unclear']),
+  intent: z.enum(['store', 'retrieve', 'update', 'unclear', 'purchase', 'clear_list']),
   tags: z.array(z.string()).min(1).max(4),
   content: z.string(),
   searchTerms: z.array(z.string()),
   confidence: z.number().min(0).max(1),
   // New revision fields
   replaces: z.string().optional(), // Tag or ID being replaced
-  timestamp: z.string().optional() // ISO string timestamp
+  timestamp: z.string().optional(), // ISO string timestamp
+  // New shopping list fields
+  items: z.array(z.string()).optional(), // Individual items for shopping lists
+  listType: z.string().optional() // e.g., "shopping", "grocery", "todo"
 });
 
 const QueryResponseSchema = z.object({
@@ -32,7 +35,7 @@ const QueryResponseSchema = z.object({
 });
 
 export interface ProcessedQuery {
-  intent: 'store' | 'retrieve' | 'update' | 'unclear';
+  intent: 'store' | 'retrieve' | 'update' | 'unclear' | 'purchase' | 'clear_list';
   tags: string[];
   content: string;
   searchTerms: string[];
@@ -40,6 +43,9 @@ export interface ProcessedQuery {
   // New revision fields
   replaces?: string; // Tag or ID being replaced
   timestamp?: string; // ISO string timestamp
+  // New shopping list fields
+  items?: string[]; // Individual items for shopping lists
+  listType?: string; // e.g., "shopping", "grocery", "todo"
 }
 
 export interface QueryResponse {
@@ -49,17 +55,17 @@ export interface QueryResponse {
   suggestions: string[];
 }
 
-// Updated function definition for tag-based processing with revision support
+// Updated function definition for tag-based processing with revision and shopping support
 const tagProcessingFunction = {
   name: "process_user_input",
-  description: "Analyze user input to determine intent and generate relevant tags for a knowledge management system with revision support",
+  description: "Analyze user input to determine intent and generate relevant tags for a knowledge management system with revision and shopping list support",
   parameters: {
     type: "object",
     properties: {
       intent: {
         type: "string",
-        enum: ["store", "retrieve", "update", "unclear"],
-        description: "Intent: 'store' for new info, 'retrieve' for search, 'update' when replacing/changing existing info, 'unclear' if uncertain"
+        enum: ["store", "retrieve", "update", "unclear", "purchase", "clear_list"],
+        description: "Intent: 'store' for new info, 'retrieve' for search, 'update' when replacing/changing existing info, 'purchase' when marking items as bought, 'clear_list' for bulk operations, 'unclear' if uncertain"
       },
       tags: {
         type: "array",
@@ -90,12 +96,24 @@ const tagProcessingFunction = {
       timestamp: {
         type: "string",
         description: "ISO 8601 timestamp string (automatically set if not provided)"
+      },
+      items: {
+        type: "array",
+        items: { type: "string" },
+        description: "For shopping lists: individual items mentioned (e.g., ['butter', 'milk', 'cheese', 'bread'])"
+      },
+      listType: {
+        type: "string",
+        description: "Type of list: 'shopping', 'grocery', 'todo', etc."
       }
     },
     required: ["intent", "tags", "content", "searchTerms", "confidence"],
     // replaces and timestamp are optional but should be provided for updates
+    // items and listType should be provided for shopping operations
     conditionallyRequired: {
-      update: ["replaces"]
+      update: ["replaces"],
+      purchase: ["items"],
+      clear_list: ["listType"]
     }
   }
 };
@@ -127,49 +145,77 @@ const responseFunction = {
   }
 };
 
-// Updated system prompt for tag-based processing with revision support
-const TAGGING_PROMPT = `You are an AI assistant that helps organize and tag shared knowledge with intelligent revision tracking.
+// Enhanced system prompt for tag-based processing with revision and shopping list support
+const TAGGING_PROMPT = `You are an AI assistant that helps organize and tag shared knowledge with intelligent revision tracking and shopping list management.
 
 Your job is to:
 1. Determine the user's **intent**:
    - "store": Adding completely new information
-   - "retrieve": Looking for existing information
+   - "retrieve": Looking for existing information  
    - "update": Changing, correcting, or replacing existing information
+   - "purchase": Marking items as bought/completed (removes from need list)
+   - "clear_list": Bulk operations to clear/reset lists
    - "unclear": Cannot determine intent
 
-2. **CRITICAL for updates**: Detect update language like:
+2. **SHOPPING LIST SEMANTICS**:
+   - "Add X to shopping list" → store, items: ["X"], listType: "shopping"
+   - "I bought/purchased X" → purchase, items: ["X"], replaces: "shopping"
+   - "Clear my grocery list" → clear_list, listType: "grocery"
+   - Smart matching: "bought cheese" should match "sliced cheese" from list
+
+3. **CRITICAL for updates**: Detect update language like:
    - "We moved/changed/updated the [thing] to [new value]"
    - "The [thing] is now [new value]" 
    - "Actually, the [thing] is [new value]"
    - "Correction: [thing] is [new value]"
-   - "[Thing] changed from [old] to [new]"
 
-3. For **updates**, set:
-   - intent: "update"
-   - replaces: The main concept/tag being updated (e.g., "family-reunion", "wifi-password", "doctor")
-   - content: Store the COMPLETE updated information as a full, readable sentence
-   - tags: Same tags as the original concept
+4. **CRITICAL for purchases**: Detect purchase language like:
+   - "I bought/purchased [items]"
+   - "We got [items] from the store"
+   - "[Person] picked up [items]"
+   - "Got [items] today"
 
-4. Return relevant **tags** (2–4 max) using lowercase terms.
-5. Extract useful **search terms**.
-6. Provide **confidence** score (0.0-1.0).
+5. For **shopping operations**, set:
+   - intent: "purchase" or "clear_list" 
+   - items: Extract individual items as array
+   - listType: "shopping", "grocery", "todo", etc.
+   - replaces: The list type being affected
+
+6. Return relevant **tags** (2–4 max) using lowercase terms.
+7. Extract useful **search terms**.
+8. Provide **confidence** score (0.0-1.0).
 
 **Examples:**
-- "Our doctor is Dr. Ramirez at Westside Pediatrics" → store, content: "Our doctor is Dr. Ramirez at Westside Pediatrics", tags: ["doctor", "health", "pediatrics"]
+- "Add butter, milk, sliced cheese, and bread to my shopping list" → store, content: "Need butter, milk, sliced cheese, and bread", tags: ["shopping", "groceries"], items: ["butter", "milk", "sliced cheese", "bread"], listType: "shopping"
+
+- "My wife purchased cheese and milk" → purchase, content: "Purchased cheese and milk", tags: ["shopping", "groceries"], items: ["cheese", "milk"], replaces: "shopping"
+
+- "Clear my grocery list" → clear_list, content: "Clear grocery list", tags: ["shopping", "groceries"], listType: "grocery"
+
+- "What do I need from the store?" → retrieve, content: "What do I need from the store?", tags: ["shopping", "groceries"]
+
 - "We moved the family reunion to July 9" → update, content: "The family reunion is scheduled for July 9", tags: ["family", "reunion", "event"], replaces: "family-reunion"
-- "The WiFi password changed to NewPass123" → update, content: "The WiFi password is NewPass123", tags: ["wifi", "password"], replaces: "wifi-password"  
-- "Actually, the meeting is at 3pm, not 2pm" → update, content: "The meeting is at 3pm", tags: ["meeting", "schedule"], replaces: "meeting"
-- "Where are the Christmas lights?" → retrieve, content: "Where are the Christmas lights?", tags: ["holiday", "storage", "lights"]
+
+- "Our doctor is Dr. Ramirez at Westside Pediatrics" → store, content: "Our doctor is Dr. Ramirez at Westside Pediatrics", tags: ["doctor", "health", "pediatrics"]
 
 **Key Rules**: 
-- For updates: Store COMPLETE information, not just the change! 
-- Watch for change language (moved, changed, updated, actually, correction, now) to detect updates!
-- Always provide full, readable content that stands alone!`;
+- For shopping: Extract individual items and understand list operations!
+- For purchases: Mark items as bought to remove from active shopping list!
+- For updates: Store COMPLETE information, not just the change!
+- Always provide full, readable content that stands alone!
+- Smart matching: "cheese" matches "sliced cheese", "milk" matches "whole milk"!`;
 
-// Updated system prompt for generating responses with tags
-const RESPONSE_PROMPT = `You are a helpful AI assistant for managing shared household and personal knowledge. 
+// Enhanced system prompt for generating responses with shopping list awareness
+const RESPONSE_PROMPT = `You are a helpful AI assistant for managing shared household and personal knowledge with smart shopping list capabilities.
 
 Given a user's query and relevant knowledge entries, provide a helpful, conversational response. 
+
+**SHOPPING LIST INTELLIGENCE**:
+- For "What do I need?" queries: Show only ACTIVE shopping list items (no "purchased" or "cleared" tags)
+- For "What did I buy?" queries: Show only purchase records ("purchased" tag)
+- Smart filtering: Ignore superseded entries (replaced_by field set)
+- If no active items: "Your shopping list is empty" or "You don't have any items on your shopping list right now"
+- If shopping list was recently cleared: Acknowledge it and suggest adding new items
 
 Guidelines:
 - Be warm and conversational, like talking to a helpful friend
@@ -180,6 +226,8 @@ Guidelines:
 - Don't assume specific relationships (could be family, roommates, partners, etc.)
 - Make the experience personal to the current user
 - When referencing entries, show their tags like: 🏷️ [wifi, password]: "The WiFi password is..."
+- For shopping lists, present items clearly: "You need: butter, milk, cheese, bread"
+- For empty shopping lists, be encouraging: "Your shopping list is empty! Ready to add some items?"
 
 Provide 2-3 helpful follow-up suggestions that make sense in context.`;
 
