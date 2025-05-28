@@ -3,6 +3,20 @@
 :root {
   --background: #ffffff;
   --foreground: #171717;
+  
+  /* Enhanced color system */
+  --color-primary-50: #eff6ff;
+  --color-primary-500: #3b82f6;
+  --color-primary-600: #2563eb;
+  --color-accent-50: #f0fdf4;
+  --color-accent-500: #22c55e;
+  --color-accent-600: #16a34a;
+  
+  /* Knowledge type colors */
+  --color-knowledge-reminder: #f59e0b;
+  --color-knowledge-document: #8b5cf6;
+  --color-knowledge-contact: #06b6d4;
+  --color-knowledge-location: #ef4444;
 }
 
 @theme inline {

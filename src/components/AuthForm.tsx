@@ -69,7 +69,7 @@ export default function AuthForm({ onSuccess }: AuthFormProps) {
           </div>
           <p className="text-gray-600">
             {isSignUp 
-              ? 'Create your shared knowledge account' 
+              ? 'Create your shared knowledge space' 
               : 'Sign in to your shared knowledge'
             }
           </p>
@@ -192,13 +192,13 @@ export default function AuthForm({ onSuccess }: AuthFormProps) {
         {/* Toggle Sign In/Up */}
         <div className="mt-6 text-center">
           <p className="text-sm text-gray-600">
-            {isSignUp ? 'Already have an account?' : "Don't have an account?"}
+            {isSignUp ? 'Already have a space?' : "Don't have a space?"}
             <button
               type="button"
               onClick={() => setIsSignUp(!isSignUp)}
               className="ml-1 text-blue-500 hover:text-blue-600 font-medium"
             >
-              {isSignUp ? 'Sign in' : 'Sign up'}
+              {isSignUp ? 'Sign in' : 'Create one'}
             </button>
           </p>
         </div>

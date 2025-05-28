@@ -1,8 +1,8 @@
 # Memory Merge
 
-**An intelligent, shared knowledge repository for households**
+**An intelligent, shared knowledge repository for teams and groups**
 
-Memory Merge is a Progressive Web App that allows household members (couples, families, roommates, etc.) to store, organize, and retrieve shared information through natural language interactions. Built with Next.js, Firebase, and OpenAI, it creates a centralized, AI-powered system that multiple people can easily access and contribute to, while providing each user with a personalized experience.
+Memory Merge is a Progressive Web App that allows team members, groups, and collaborators to store, organize, and retrieve shared information through natural language interactions. Built with Next.js, Firebase, and OpenAI, it creates a centralized, AI-powered system that multiple people can easily access and contribute to, while providing each user with a personalized experience.
 
 ## Features
 

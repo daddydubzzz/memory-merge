@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useState, useRef, useEffect } from 'react';
-import { Send, Mic, MicOff, Loader2 } from 'lucide-react';
+import { Send, Mic, MicOff } from 'lucide-react';
 import { useAuth } from '@/contexts/AuthContext';
 import { KnowledgeService } from '@/lib/knowledge';
 import type { KnowledgeEntry } from '@/lib/constants';
@@ -21,19 +21,8 @@ interface ChatInterfaceProps {
 
 export default function ChatInterface({ accountId }: ChatInterfaceProps) {
   const { user } = useAuth();
-  const [messages, setMessages] = useState<Message[]>([
-    {
-      id: '1',
-      content: "Hi! I'm here to help you organize and find your household information. You can ask me questions like 'Where did we put the Christmas decorations?' or tell me something new like 'We just bought a new dishwasher warranty that expires in 2027'.",
-      isUser: false,
-      timestamp: new Date(),
-      suggestions: [
-        "Tell me about home warranties",
-        "What restaurants do I like?",
-        "Where are important documents?"
-      ]
-    }
-  ]);
+  
+  const [messages, setMessages] = useState<Message[]>([]);
   const [inputValue, setInputValue] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [isListening, setIsListening] = useState(false);
@@ -185,56 +174,39 @@ export default function ChatInterface({ accountId }: ChatInterfaceProps) {
     }
   };
 
-  const handleSuggestionClick = (suggestion: string) => {
-    handleSendMessage(suggestion);
-  };
-
   return (
     <div className="flex flex-col h-full bg-white">
       {/* Messages */}
       <div className="flex-1 overflow-y-auto p-4 space-y-4">
         {messages.map((message) => (
           <div key={message.id} className={`flex ${message.isUser ? 'justify-end' : 'justify-start'}`}>
-            <div className={`max-w-xs lg:max-w-md px-4 py-2 rounded-lg ${
+            <div className={`max-w-xs lg:max-w-md px-4 py-3 rounded-lg ${
               message.isUser 
                 ? 'bg-blue-500 text-white' 
-                : 'bg-gray-100 text-gray-900'
+                : 'bg-gray-50 text-gray-900 border border-gray-200'
             }`}>
-              <p className="text-sm">{message.content}</p>
+              <p className="text-sm leading-relaxed">{message.content}</p>
               
-              {/* Show sources if available */}
+              {/* Enhanced sources display */}
               {message.sources && message.sources.length > 0 && (
-                <div className="mt-2 pt-2 border-t border-gray-300">
-                  <p className="text-xs font-medium">Sources:</p>
+                <div className="mt-3 pt-3 border-t border-gray-300">
+                  <p className="text-xs font-medium text-gray-600 mb-2">Found in your knowledge:</p>
                   {message.sources.map((source, index) => (
-                    <div key={source.id || index} className="text-xs mt-1 opacity-75">
+                    <div key={source.id || index} className="bg-white rounded p-2 mb-2 last:mb-0">
                       <div className="flex flex-wrap gap-1 mb-1">
                         {source.tags.map((tag: string) => (
-                          <span key={tag} className="text-blue-600 font-medium">#{tag}</span>
+                          <span key={tag} className="inline-flex items-center px-1.5 py-0.5 rounded text-xs bg-blue-100 text-blue-700">
+                            {tag}
+                          </span>
                         ))}
                       </div>
-                      <span>{source.content.substring(0, 100)}...</span>
+                      <span className="text-xs text-gray-600">{source.content.substring(0, 100)}...</span>
                     </div>
                   ))}
                 </div>
               )}
               
-              {/* Show suggestions */}
-              {message.suggestions && message.suggestions.length > 0 && (
-                <div className="mt-2 space-y-1">
-                  {message.suggestions.map((suggestion, index) => (
-                    <button
-                      key={index}
-                      onClick={() => handleSuggestionClick(suggestion)}
-                      className="block w-full text-left text-xs px-2 py-1 bg-white bg-opacity-20 rounded text-gray-700 hover:bg-opacity-30 transition-colors"
-                    >
-                      {suggestion}
-                    </button>
-                  ))}
-                </div>
-              )}
-              
-              <p className="text-xs opacity-75 mt-1">
+              <p className="text-xs opacity-60 mt-2">
                 {message.timestamp.toLocaleTimeString()}
               </p>
             </div>
@@ -243,9 +215,13 @@ export default function ChatInterface({ accountId }: ChatInterfaceProps) {
         
         {isLoading && (
           <div className="flex justify-start">
-            <div className="bg-gray-100 text-gray-900 px-4 py-2 rounded-lg flex items-center space-x-2">
-              <Loader2 className="w-4 h-4 animate-spin" />
-              <span className="text-sm">Thinking...</span>
+            <div className="bg-gray-50 border border-gray-200 text-gray-900 px-4 py-3 rounded-lg flex items-center space-x-3">
+              <div className="flex space-x-1">
+                <div className="w-2 h-2 bg-blue-500 rounded-full animate-bounce"></div>
+                <div className="w-2 h-2 bg-blue-500 rounded-full animate-bounce" style={{ animationDelay: '0.1s' }}></div>
+                <div className="w-2 h-2 bg-blue-500 rounded-full animate-bounce" style={{ animationDelay: '0.2s' }}></div>
+              </div>
+              <span className="text-sm">AI is thinking...</span>
             </div>
           </div>
         )}
@@ -253,7 +229,7 @@ export default function ChatInterface({ accountId }: ChatInterfaceProps) {
         <div ref={messagesEndRef} />
       </div>
 
-      {/* Input area */}
+      {/* Enhanced Input area */}
       <div className="border-t bg-white p-4">
         <div className="flex space-x-2">
           <div className="flex-1 relative">
@@ -263,40 +239,52 @@ export default function ChatInterface({ accountId }: ChatInterfaceProps) {
               onChange={(e) => setInputValue(e.target.value)}
               onKeyPress={(e) => e.key === 'Enter' && handleSendMessage(inputValue)}
               placeholder="Ask a question or share information..."
-              className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+              className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent text-sm text-gray-900 placeholder-gray-500 bg-white"
               disabled={isLoading}
             />
+            {/* Character count for long messages */}
+            {inputValue.length > 100 && (
+              <div className="absolute right-3 top-1/2 transform -translate-y-1/2 text-xs text-gray-400">
+                {inputValue.length}
+              </div>
+            )}
           </div>
           
-          {/* Voice input button */}
+          {/* Enhanced voice button */}
           {recognition && (
             <button
               onClick={isListening ? stopListening : startListening}
-              className={`px-3 py-2 rounded-lg transition-colors ${
+              className={`px-3 py-3 rounded-lg transition-all ${
                 isListening 
-                  ? 'bg-red-500 text-white' 
+                  ? 'bg-red-500 text-white shadow-lg' 
                   : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
               }`}
               disabled={isLoading}
+              title={isListening ? 'Stop listening' : 'Start voice input'}
             >
               {isListening ? <MicOff className="w-5 h-5" /> : <Mic className="w-5 h-5" />}
             </button>
           )}
           
-          {/* Send button */}
+          {/* Enhanced send button */}
           <button
             onClick={() => handleSendMessage(inputValue)}
             disabled={!inputValue.trim() || isLoading}
-            className="px-4 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+            className="px-4 py-3 bg-blue-500 text-white rounded-lg hover:bg-blue-600 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+            title="Send message"
           >
             <Send className="w-5 h-5" />
           </button>
         </div>
         
+        {/* Enhanced listening indicator */}
         {isListening && (
-          <p className="text-sm text-gray-500 mt-2 text-center">
-            Listening... Speak now
-          </p>
+          <div className="mt-2 text-center">
+            <div className="inline-flex items-center text-sm text-red-600">
+              <div className="w-2 h-2 bg-red-500 rounded-full mr-2 animate-pulse"></div>
+              Listening... Speak now
+            </div>
+          </div>
         )}
       </div>
     </div>

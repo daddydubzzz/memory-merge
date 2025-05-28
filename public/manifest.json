@@ -1,7 +1,7 @@
 {
   "name": "Memory Merge",
   "short_name": "Memory Merge",
-  "description": "Shared knowledge repository for couples",
+  "description": "AI-powered shared knowledge base for any group",
   "start_url": "/",
   "display": "standalone",
   "background_color": "#ffffff",

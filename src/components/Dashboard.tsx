@@ -16,6 +16,7 @@ import { useAuth } from '@/contexts/AuthContext';
 import { getAccountByMember, createAccount, KnowledgeService, getTagStats } from '@/lib/knowledge';
 import { SUGGESTED_TAGS } from '@/lib/constants';
 import ChatInterface from './ChatInterface';
+import KnowledgeHub from './KnowledgeHub';
 
 interface DashboardProps {
   accountId: string | null;
@@ -43,6 +44,13 @@ export default function Dashboard({ accountId, onAccountSetup }: DashboardProps)
       .slice(0, 10), 
     [tagStats]
   );
+
+  // Navigation items configuration
+  const navigationItems = [
+    { id: 'chat', label: 'Chat', icon: MessageCircle },
+    { id: 'knowledge', label: 'Knowledge Hub', icon: Archive },
+    { id: 'settings', label: 'Settings', icon: Settings }
+  ];
 
   // Load recent entries and tag stats (only when accountId changes)
   useEffect(() => {
@@ -96,8 +104,8 @@ export default function Dashboard({ accountId, onAccountSetup }: DashboardProps)
   }, []);
 
   const handleTagClick = useCallback((tag: string) => {
-    // TODO: Implement tag filtering in browse view
-    setActiveView('browse');
+    // TODO: Implement tag filtering in knowledge view
+    setActiveView('knowledge');
     setSidebarOpen(false);
   }, []);
 
@@ -122,44 +130,23 @@ export default function Dashboard({ accountId, onAccountSetup }: DashboardProps)
       {/* Navigation */}
       <nav className="flex-1 p-4">
         <div className="space-y-2">
-          <button
-            onClick={() => handleViewChange('chat')}
-            className={`w-full flex items-center px-3 py-2 rounded-lg transition-colors ${
-              activeView === 'chat'
-                ? 'bg-blue-600 text-white'
-                : 'text-gray-300 hover:bg-gray-700'
-            }`}
-          >
-            <MessageCircle className="w-5 h-5 mr-3" />
-            Chat
-          </button>
-
-          <button
-            onClick={() => handleViewChange('browse')}
-            className={`w-full flex items-center px-3 py-2 rounded-lg transition-colors ${
-              activeView === 'browse'
-                ? 'bg-blue-600 text-white'
-                : 'text-gray-300 hover:bg-gray-700'
-            }`}
-          >
-            <Archive className="w-5 h-5 mr-3" />
-            Browse Knowledge
-          </button>
-
-          <button
-            onClick={() => handleViewChange('settings')}
-            className={`w-full flex items-center px-3 py-2 rounded-lg transition-colors ${
-              activeView === 'settings'
-                ? 'bg-blue-600 text-white'
-                : 'text-gray-300 hover:bg-gray-700'
-            }`}
-          >
-            <Settings className="w-5 h-5 mr-3" />
-            Settings
-          </button>
+          {navigationItems.map((item) => (
+            <button
+              key={item.id}
+              onClick={() => handleViewChange(item.id)}
+              className={`w-full flex items-center px-3 py-2 rounded-lg transition-colors ${
+                activeView === item.id
+                  ? 'bg-blue-600 text-white'
+                  : 'text-gray-300 hover:bg-gray-700'
+              }`}
+            >
+              <item.icon className="w-5 h-5 mr-3" />
+              {item.label}
+            </button>
+          ))}
         </div>
 
-        {/* Popular Tags */}
+        {/* Enhanced Popular Tags Section */}
         <div className="mt-8">
           <h3 className="text-sm font-medium text-gray-400 mb-3">Popular Tags</h3>
           <div className="space-y-2">
@@ -167,11 +154,14 @@ export default function Dashboard({ accountId, onAccountSetup }: DashboardProps)
               topTags.map(([tag, count]) => (
                 <div
                   key={tag}
-                  className="flex items-center justify-between text-sm cursor-pointer hover:bg-gray-700 px-2 py-1 rounded"
+                  className="flex items-center justify-between text-sm cursor-pointer hover:bg-gray-700 px-2 py-1 rounded group"
                   onClick={() => handleTagClick(tag)}
                 >
-                  <span className="text-gray-300">#{tag}</span>
-                  <span className="text-gray-500">{count}</span>
+                  <div className="flex items-center">
+                    <div className="w-2 h-2 bg-blue-400 rounded-full mr-2 opacity-60 group-hover:opacity-100" />
+                    <span className="text-gray-300">{tag}</span>
+                  </div>
+                  <span className="text-gray-500 text-xs">{count}</span>
                 </div>
               ))
             ) : (
@@ -182,7 +172,7 @@ export default function Dashboard({ accountId, onAccountSetup }: DashboardProps)
       </nav>
 
       {/* Footer */}
-      <div className="p-4 border-t border-gray-700">
+      <div className="p-4">
         <button
           onClick={handleSignOut}
           className="w-full flex items-center px-3 py-2 text-gray-300 hover:bg-gray-700 rounded-lg transition-colors"
@@ -230,8 +220,15 @@ export default function Dashboard({ accountId, onAccountSetup }: DashboardProps)
         {/* Content area */}
         <div className="flex-1">
           {activeView === 'chat' && <ChatInterface accountId={accountId} />}
-          {activeView === 'browse' && <BrowseView accountId={accountId} />}
-          {activeView === 'settings' && <SettingsView />}
+          {activeView === 'knowledge' && <KnowledgeHub accountId={accountId} />}
+          {activeView === 'settings' && (
+            <SettingsView 
+              accountId={accountId} 
+              recentEntries={recentEntries} 
+              tagStats={tagStats} 
+              user={user} 
+            />
+          )}
         </div>
       </div>
     </div>
@@ -262,9 +259,9 @@ function AccountSetup({ onAccountCreated }: { onAccountCreated: (accountId: stri
       <div className="max-w-md w-full bg-white rounded-lg shadow-lg p-8">
         <div className="text-center mb-8">
           <Heart className="w-12 h-12 text-pink-500 mx-auto mb-4" />
-          <h1 className="text-2xl font-bold text-gray-900 mb-2">Create Your Shared Account</h1>
+          <h1 className="text-2xl font-bold text-gray-900 mb-2">Create Your Shared Space</h1>
           <p className="text-gray-600">
-            Set up a shared knowledge space that you and your family, partner, or household members can all access and contribute to
+            Set up a shared knowledge space that you and your team, group, or collaborators can all access and contribute to
           </p>
         </div>
 
@@ -275,7 +272,7 @@ function AccountSetup({ onAccountCreated }: { onAccountCreated: (accountId: stri
             className="w-full bg-blue-500 text-white py-3 px-4 rounded-lg hover:bg-blue-600 disabled:opacity-50 transition-colors flex items-center justify-center"
           >
             <Plus className="w-5 h-5 mr-2" />
-            {loading ? 'Creating Account...' : 'Create Shared Account'}
+            {loading ? 'Creating Space...' : 'Create Knowledge Space'}
           </button>
 
           <div className="relative">
@@ -321,12 +318,55 @@ function BrowseView({ accountId }: { accountId: string }) {
 }
 
 // Settings view component
-function SettingsView() {
+function SettingsView({ accountId, recentEntries, tagStats, user }: { accountId: string, recentEntries: any[], tagStats: Record<string, number>, user: any }) {
+  const totalEntries = recentEntries.length;
+  const totalTags = Object.keys(tagStats).length;
+  const mostUsedTag = Object.entries(tagStats).sort(([, a], [, b]) => b - a)[0];
+
   return (
-    <div className="p-6">
+    <div className="p-6 max-w-4xl">
       <h2 className="text-2xl font-bold text-gray-900 mb-6">Settings</h2>
-      <p className="text-gray-600">Manage your account and preferences.</p>
-      {/* TODO: Implement settings interface */}
+      
+      <div className="grid gap-6 md:grid-cols-2">
+        {/* Account Information */}
+        <div className="bg-white rounded-lg shadow p-6">
+          <h3 className="text-lg font-semibold text-gray-900 mb-4">Account Information</h3>
+          <div className="space-y-3">
+            <div>
+              <label className="text-sm font-medium text-gray-600">Account ID</label>
+              <div className="mt-1 p-2 bg-gray-50 rounded border text-sm text-gray-800 font-mono">
+                {accountId}
+              </div>
+              <p className="text-xs text-gray-500 mt-1">Share this ID with others to invite them to your knowledge space</p>
+            </div>
+            <div>
+              <label className="text-sm font-medium text-gray-600">Signed in as</label>
+              <p className="text-sm text-gray-800">{user?.displayName || user?.email}</p>
+            </div>
+          </div>
+        </div>
+
+        {/* Usage Statistics */}
+        <div className="bg-white rounded-lg shadow p-6">
+          <h3 className="text-lg font-semibold text-gray-900 mb-4">Usage Statistics</h3>
+          <div className="space-y-3">
+            <div className="flex justify-between items-center">
+              <span className="text-sm font-medium text-gray-600">Knowledge Entries</span>
+              <span className="text-lg font-semibold text-blue-600">{totalEntries}</span>
+            </div>
+            <div className="flex justify-between items-center">
+              <span className="text-sm font-medium text-gray-600">Total Tags</span>
+              <span className="text-lg font-semibold text-green-600">{totalTags}</span>
+            </div>
+            {mostUsedTag && (
+              <div className="flex justify-between items-center">
+                <span className="text-sm font-medium text-gray-600">Most Used Tag</span>
+                <span className="text-sm bg-blue-100 text-blue-800 px-2 py-1 rounded font-medium">{mostUsedTag[0]} ({mostUsedTag[1]})</span>
+              </div>
+            )}
+          </div>
+        </div>
+      </div>
     </div>
   );
 } 
