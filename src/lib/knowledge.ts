@@ -76,20 +76,45 @@ export class KnowledgeService {
     this.accountId = accountId;
   }
 
-  // Store new knowledge entry with vector embedding
+  // Store new knowledge entry with vector embedding and revision support
   async addKnowledge(entry: Omit<KnowledgeEntry, 'id' | 'createdAt' | 'updatedAt' | 'accountId'>): Promise<string> {
     try {
+      // Set default intent if not specified
+      const entryWithDefaults = {
+        ...entry,
+        intent: entry.intent || 'create' as const,
+        timestamp: entry.timestamp || new Date().toISOString()
+      };
+
+      console.log('🔄 Adding knowledge entry:', {
+        intent: entryWithDefaults.intent,
+        content: entryWithDefaults.content,
+        replaces: entryWithDefaults.replaces,
+        timestamp: entryWithDefaults.timestamp
+      });
+
+      // Handle revision logic for updates
+      if (entryWithDefaults.intent === 'update' && entryWithDefaults.replaces) {
+        console.log('🔄 Processing update - calling handleMemoryReplacement');
+        await this.handleMemoryReplacement(entryWithDefaults.replaces, entryWithDefaults.timestamp);
+      } else {
+        console.log('🔄 Not an update or no replaces field:', { 
+          intent: entryWithDefaults.intent, 
+          replaces: entryWithDefaults.replaces 
+        });
+      }
+
       // Try to store with vector embedding first via API
       try {
         const result = await callKnowledgeAPI('store', {
           accountId: this.accountId,
-          entry
+          entry: entryWithDefaults
         });
         
         console.log('Stored with vector embedding:', result.id);
         
         // Also store in Firestore for backup/compatibility
-        await this.addKnowledgeFirestore(entry);
+        await this.addKnowledgeFirestore(entryWithDefaults);
         
         // Invalidate caches since we added new data
         cache.invalidatePattern(this.accountId);
@@ -98,7 +123,7 @@ export class KnowledgeService {
       } catch (vectorError) {
         console.warn('Vector storage failed, using Firestore only:', vectorError);
         // Fallback to Firestore only
-        const id = await this.addKnowledgeFirestore(entry);
+        const id = await this.addKnowledgeFirestore(entryWithDefaults);
         
         // Invalidate caches for fallback too
         cache.invalidatePattern(this.accountId);
@@ -111,19 +136,135 @@ export class KnowledgeService {
     }
   }
 
-  // Original Firestore storage method (kept as fallback)
+  // Handle memory replacement logic - improved to handle Firestore null/undefined differences
+  private async handleMemoryReplacement(replaces: string, newTimestamp: string): Promise<void> {
+    try {
+      console.log(`🔄 handleMemoryReplacement called with replaces: "${replaces}"`);
+      
+      // First try to find by exact ID
+      let entriesToReplace: KnowledgeEntry[] = [];
+      
+      try {
+        // If replaces looks like an ID, try to find by ID
+        if (replaces.length > 10) {
+          const knowledgeRef = collection(db, 'knowledge');
+          const idQuery = query(
+            knowledgeRef,
+            where('accountId', '==', this.accountId),
+            where('__name__', '==', replaces)
+          );
+          const idSnapshot = await getDocs(idQuery);
+          entriesToReplace = idSnapshot.docs.map(doc => ({
+            id: doc.id,
+            ...doc.data(),
+            createdAt: doc.data().createdAt?.toDate() || new Date(),
+            updatedAt: doc.data().updatedAt?.toDate() || new Date(),
+          })) as KnowledgeEntry[];
+          console.log(`🔍 ID search for "${replaces}": found ${entriesToReplace.length} entries`);
+        }
+      } catch (error) {
+        console.warn('ID lookup failed, trying tag search:', error);
+      }
+
+      // If no ID match found, search by tag concept (improved approach)
+      if (entriesToReplace.length === 0) {
+        const knowledgeRef = collection(db, 'knowledge');
+        
+        // Create multiple search strategies for better matching
+        const searchStrategies = [
+          replaces, // Exact match: "family-reunion"
+          replaces.replace(/-/g, ' '), // With spaces: "family reunion"  
+          ...replaces.split('-'), // Individual parts: ["family", "reunion"]
+        ].filter(Boolean);
+
+        console.log(`🔍 Searching with strategies:`, searchStrategies);
+
+        // Try each search strategy
+        for (const searchTerm of searchStrategies) {
+          try {
+            const tagQuery = query(
+              knowledgeRef,
+              where('accountId', '==', this.accountId),
+              where('tags', 'array-contains', searchTerm),
+              orderBy('createdAt', 'desc')
+            );
+            
+            const tagSnapshot = await getDocs(tagQuery);
+            const foundEntries = tagSnapshot.docs.map(doc => ({
+              id: doc.id,
+              ...doc.data(),
+              createdAt: doc.data().createdAt?.toDate() || new Date(),
+              updatedAt: doc.data().updatedAt?.toDate() || new Date(),
+            })) as KnowledgeEntry[];
+            
+            console.log(`🔍 Tag search for "${searchTerm}": found ${foundEntries.length} entries`);
+            
+            // Filter to only non-replaced entries and add to results
+            const nonReplacedEntries = foundEntries.filter(entry => !entry.replaced_by);
+            entriesToReplace.push(...nonReplacedEntries);
+            
+            // If we found matches, stop searching
+            if (nonReplacedEntries.length > 0) {
+              console.log(`✅ Found ${nonReplacedEntries.length} entries to replace with search term: ${searchTerm}`);
+              break;
+            }
+          } catch (error) {
+            console.warn(`Tag search failed for "${searchTerm}":`, error);
+          }
+        }
+      }
+
+      // Mark all found entries as replaced
+      for (const entryToReplace of entriesToReplace) {
+        if (entryToReplace.id) {
+          console.log(`🔄 Marking entry ${entryToReplace.id} as replaced:`, {
+            content: entryToReplace.content.substring(0, 50) + '...',
+            tags: entryToReplace.tags,
+            willBeReplacedBy: newTimestamp
+          });
+          
+          await this.updateKnowledge(entryToReplace.id, {
+            replaced_by: newTimestamp
+          });
+          console.log(`✅ Successfully marked entry ${entryToReplace.id} as replaced by ${newTimestamp}`);
+        }
+      }
+
+      if (entriesToReplace.length > 0) {
+        console.log(`✅ Successfully replaced ${entriesToReplace.length} entries for: ${replaces}`);
+      } else {
+        console.log(`⚠️ No existing entries found to replace for: ${replaces}`);
+      }
+    } catch (error) {
+      console.error('❌ Error handling memory replacement:', error);
+      // Don't throw - allow the new entry to be stored even if replacement fails
+    }
+  }
+
+  // Original Firestore storage method (kept as fallback) - filters undefined revision fields
   private async addKnowledgeFirestore(entry: Omit<KnowledgeEntry, 'id' | 'createdAt' | 'updatedAt' | 'accountId'>): Promise<string> {
-    const docRef = await addDoc(collection(db, 'knowledge'), {
-      ...entry,
+    // Filter out undefined revision fields for Firestore compatibility
+    const cleanEntry = {
+      content: entry.content,
+      tags: entry.tags,
+      addedBy: entry.addedBy,
       accountId: this.accountId,
       createdAt: serverTimestamp(),
       updatedAt: serverTimestamp(),
-    });
+      // Initialize revision fields properly for Firestore
+      intent: entry.intent || 'create',
+      timestamp: entry.timestamp || new Date().toISOString(),
+      replaced_by: null, // Explicitly set to null for consistent Firestore queries
+      // Only include replaces if it exists
+      ...(entry.replaces && { replaces: entry.replaces })
+    };
+
+    const docRef = await addDoc(collection(db, 'knowledge'), cleanEntry);
     return docRef.id;
   }
 
-  // Enhanced search using vector similarity with tag-based filtering and caching
-  async searchKnowledge(searchTerms: string[], tags?: string[]): Promise<KnowledgeEntry[]> {
+  // Enhanced search using vector similarity with tag-based filtering, caching, and revision support
+  async searchKnowledge(searchTerms: string[], tags?: string[], includeSuperseded: boolean = false): Promise<KnowledgeEntry[]> {
     const searchQuery = searchTerms.join(' ');
     const cacheKey = cacheKeys.searchResults(this.accountId, searchQuery, tags);
     
@@ -131,7 +272,7 @@ export class KnowledgeService {
     const cached = cache.get<KnowledgeEntry[]>(cacheKey);
     if (cached) {
       console.log('🔍 Search results served from cache');
-      return cached;
+      return this.filterSupersededEntries(cached, includeSuperseded);
     }
 
     try {
@@ -156,21 +297,26 @@ export class KnowledgeService {
           addedBy: vectorResult.addedBy,
           createdAt: new Date(vectorResult.createdAt),
           updatedAt: new Date(vectorResult.updatedAt),
-          accountId: this.accountId
+          accountId: this.accountId,
+          // Map revision fields if they exist
+          timestamp: vectorResult.timestamp,
+          replaces: vectorResult.replaces,
+          replaced_by: vectorResult.replaced_by,
+          intent: vectorResult.intent
         }));
 
         // If we have good vector results, cache and return them
         if (knowledgeEntries.length > 0) {
           cache.set(cacheKey, knowledgeEntries, 2); // 2 minute cache
           console.log(`🔍 Vector search found ${knowledgeEntries.length} results`);
-          return knowledgeEntries;
+          return this.filterSupersededEntries(knowledgeEntries, includeSuperseded);
         }
       } catch (vectorError) {
         console.warn('Vector search failed, falling back to Firestore:', vectorError);
       }
 
       // Fallback to original Firestore search with tag filtering
-      const results = await this.searchKnowledgeFirestore(searchTerms, tags);
+      const results = await this.searchKnowledgeFirestore(searchTerms, tags, includeSuperseded);
       
       // Cache Firestore results too (shorter TTL)
       cache.set(cacheKey, results, 1); // 1 minute cache for fallback
@@ -183,8 +329,35 @@ export class KnowledgeService {
     }
   }
 
-  // Updated Firestore search method with tag-based filtering
-  private async searchKnowledgeFirestore(searchTerms: string[], tags?: string[]): Promise<KnowledgeEntry[]> {
+  // Filter out superseded entries unless explicitly requested - robust against null/undefined
+  private filterSupersededEntries(entries: KnowledgeEntry[], includeSuperseded: boolean): KnowledgeEntry[] {
+    if (includeSuperseded) {
+      console.log(`🔍 Including all entries (${entries.length} total, including superseded)`);
+      return entries;
+    }
+    
+    const currentEntries = entries.filter(entry => {
+      const isSuperseded = entry.replaced_by && entry.replaced_by.trim() !== '';
+      return !isSuperseded;
+    });
+    
+    console.log(`🔍 Filtered entries: ${currentEntries.length} current out of ${entries.length} total`);
+    
+    // Additional debug logging for revision tracking
+    if (entries.length > currentEntries.length) {
+      const supersededEntries = entries.filter(entry => entry.replaced_by && entry.replaced_by.trim() !== '');
+      console.log(`📝 Superseded entries filtered out:`, supersededEntries.map(e => ({
+        id: e.id,
+        content: e.content.substring(0, 50) + '...',
+        replaced_by: e.replaced_by
+      })));
+    }
+    
+    return currentEntries;
+  }
+
+  // Updated Firestore search method with tag-based filtering and robust revision support
+  private async searchKnowledgeFirestore(searchTerms: string[], tags?: string[], includeSuperseded: boolean = false): Promise<KnowledgeEntry[]> {
     const knowledgeRef = collection(db, 'knowledge');
     let q = query(
       knowledgeRef,
@@ -213,28 +386,29 @@ export class KnowledgeService {
     })) as KnowledgeEntry[];
 
     // Client-side filtering for text search
+    let filteredEntries = entries;
     if (searchTerms.length > 0) {
-      const filteredEntries = entries.filter(entry => {
+      filteredEntries = entries.filter(entry => {
         const searchText = `${entry.content} ${entry.tags.join(' ')}`.toLowerCase();
         return searchTerms.some(term => 
           searchText.includes(term.toLowerCase())
         );
       });
-      return filteredEntries;
     }
 
-    return entries;
+    // Always apply superseded filtering (robust against null/undefined)
+    return this.filterSupersededEntries(filteredEntries, includeSuperseded);
   }
 
-  // Get recent knowledge entries with caching and efficient API calls
-  async getRecentKnowledge(limitCount: number = 10): Promise<KnowledgeEntry[]> {
+  // Get recent knowledge entries with caching, efficient API calls, and revision support
+  async getRecentKnowledge(limitCount: number = 10, includeSuperseded: boolean = false): Promise<KnowledgeEntry[]> {
     const cacheKey = cacheKeys.recentEntries(this.accountId, limitCount);
     
     // Check cache first (5 minute TTL)
     const cached = cache.get<KnowledgeEntry[]>(cacheKey);
     if (cached) {
       console.log('📚 Recent entries served from cache');
-      return cached;
+      return this.filterSupersededEntries(cached, includeSuperseded);
     }
 
     try {
@@ -252,13 +426,18 @@ export class KnowledgeService {
           addedBy: item.addedBy,
           createdAt: new Date(item.createdAt),
           updatedAt: new Date(item.updatedAt),
-          accountId: this.accountId
+          accountId: this.accountId,
+          // Map revision fields if they exist
+          timestamp: item.timestamp,
+          replaces: item.replaces,
+          replaced_by: item.replaced_by,
+          intent: item.intent
         }));
 
         // Cache for 5 minutes
         cache.set(cacheKey, entries, 5);
         console.log('📚 Recent entries loaded from Supabase API');
-        return entries;
+        return this.filterSupersededEntries(entries, includeSuperseded);
 
       } catch (apiError) {
         console.warn('Supabase API failed, falling back to Firestore:', apiError);
@@ -285,38 +464,80 @@ export class KnowledgeService {
       cache.set(cacheKey, entries, 3);
       console.log('📚 Recent entries loaded from Firestore fallback');
       
-      return entries;
+      return this.filterSupersededEntries(entries, includeSuperseded);
     } catch (error) {
       console.error('Error getting recent knowledge:', error);
       return [];
     }
   }
 
-  // Get knowledge by specific tags
-  async getKnowledgeByTags(tags: string[]): Promise<KnowledgeEntry[]> {
+  // Get only current (latest) memories for a given tag - excludes superseded entries
+  async getCurrentMemories(tag: string): Promise<KnowledgeEntry[]> {
     try {
       const knowledgeRef = collection(db, 'knowledge');
       const q = query(
+        knowledgeRef,
+        where('accountId', '==', this.accountId),
+        where('tags', 'array-contains', tag),
+        where('replaced_by', '==', null), // Only current entries
+        orderBy('createdAt', 'desc')
+      );
+
+      const snapshot = await getDocs(q);
+      const entries = snapshot.docs.map(doc => ({
+        id: doc.id,
+        ...doc.data(),
+        createdAt: doc.data().createdAt?.toDate() || new Date(),
+        updatedAt: doc.data().updatedAt?.toDate() || new Date(),
+      })) as KnowledgeEntry[];
+
+      console.log(`📌 Found ${entries.length} current memories for tag: ${tag}`);
+      return entries;
+    } catch (error) {
+      console.error('Error getting current memories:', error);
+      return [];
+    }
+  }
+
+  // Get knowledge by specific tags with revision support
+  async getKnowledgeByTags(tags: string[], includeSuperseded: boolean = false): Promise<KnowledgeEntry[]> {
+    try {
+      const knowledgeRef = collection(db, 'knowledge');
+      let q = query(
         knowledgeRef,
         where('accountId', '==', this.accountId),
         where('tags', 'array-contains-any', tags),
         orderBy('createdAt', 'desc')
       );
 
+      // If not including superseded, filter them out
+      if (!includeSuperseded) {
+        q = query(
+          knowledgeRef,
+          where('accountId', '==', this.accountId),
+          where('tags', 'array-contains-any', tags),
+          where('replaced_by', '==', null),
+          orderBy('createdAt', 'desc')
+        );
+      }
+
       const snapshot = await getDocs(q);
-      return snapshot.docs.map(doc => ({
+      const entries = snapshot.docs.map(doc => ({
         id: doc.id,
         ...doc.data(),
         createdAt: doc.data().createdAt?.toDate() || new Date(),
         updatedAt: doc.data().updatedAt?.toDate() || new Date(),
       })) as KnowledgeEntry[];
+
+      console.log(`🏷️ Found ${entries.length} entries for tags: ${tags.join(', ')}`);
+      return entries;
     } catch (error) {
       console.error('Error getting knowledge by tags:', error);
       return [];
     }
   }
 
-  // Update knowledge entry
+  // Update knowledge entry - filters undefined values for Firestore compatibility
   async updateKnowledge(id: string, updates: Partial<Omit<KnowledgeEntry, 'id' | 'createdAt' | 'accountId'>>): Promise<void> {
     try {
       // Try to update vector embedding if content changed
@@ -334,10 +555,15 @@ export class KnowledgeService {
         }
       }
 
+      // Filter out undefined values for Firestore
+      const cleanUpdates = Object.fromEntries(
+        Object.entries(updates).filter(([_key, value]) => value !== undefined)
+      );
+
       // Update Firestore
       const docRef = doc(db, 'knowledge', id);
       await updateDoc(docRef, {
-        ...updates,
+        ...cleanUpdates,
         updatedAt: serverTimestamp(),
       });
     } catch (error) {

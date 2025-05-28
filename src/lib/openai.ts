@@ -13,13 +13,16 @@ function createOpenAIClient() {
 // Export interfaces from constants
 export type { KnowledgeEntry } from './constants';
 
-// Updated Zod schemas for tag-based validation
+// Updated Zod schemas for tag-based validation with revision support
 const ProcessedQuerySchema = z.object({
-  intent: z.enum(['store', 'retrieve', 'unclear']),
+  intent: z.enum(['store', 'retrieve', 'update', 'unclear']),
   tags: z.array(z.string()).min(1).max(4),
   content: z.string(),
   searchTerms: z.array(z.string()),
-  confidence: z.number().min(0).max(1)
+  confidence: z.number().min(0).max(1),
+  // New revision fields
+  replaces: z.string().optional(), // Tag or ID being replaced
+  timestamp: z.string().optional() // ISO string timestamp
 });
 
 const QueryResponseSchema = z.object({
@@ -29,11 +32,14 @@ const QueryResponseSchema = z.object({
 });
 
 export interface ProcessedQuery {
-  intent: 'store' | 'retrieve' | 'unclear';
+  intent: 'store' | 'retrieve' | 'update' | 'unclear';
   tags: string[];
   content: string;
   searchTerms: string[];
   confidence: number;
+  // New revision fields
+  replaces?: string; // Tag or ID being replaced
+  timestamp?: string; // ISO string timestamp
 }
 
 export interface QueryResponse {
@@ -43,17 +49,17 @@ export interface QueryResponse {
   suggestions: string[];
 }
 
-// Updated function definition for tag-based processing
+// Updated function definition for tag-based processing with revision support
 const tagProcessingFunction = {
   name: "process_user_input",
-  description: "Analyze user input to determine intent and generate relevant tags for a household knowledge management system",
+  description: "Analyze user input to determine intent and generate relevant tags for a knowledge management system with revision support",
   parameters: {
     type: "object",
     properties: {
       intent: {
         type: "string",
-        enum: ["store", "retrieve", "unclear"],
-        description: "Whether the user wants to store new information, retrieve existing information, or intent is unclear"
+        enum: ["store", "retrieve", "update", "unclear"],
+        description: "Intent: 'store' for new info, 'retrieve' for search, 'update' when replacing/changing existing info, 'unclear' if uncertain"
       },
       tags: {
         type: "array",
@@ -64,7 +70,7 @@ const tagProcessingFunction = {
       },
       content: {
         type: "string",
-        description: "For storage: clean, processed content to store. For retrieval: the original query"
+        description: "For storage/update: clean, processed content to store. For retrieval: the original query"
       },
       searchTerms: {
         type: "array",
@@ -76,9 +82,21 @@ const tagProcessingFunction = {
         minimum: 0,
         maximum: 1,
         description: "Confidence level in the tagging and processing"
+      },
+      replaces: {
+        type: "string",
+        description: "For updates: the main tag or concept being replaced (e.g., 'family-reunion', 'wifi-password', 'doctor')"
+      },
+      timestamp: {
+        type: "string",
+        description: "ISO 8601 timestamp string (automatically set if not provided)"
       }
     },
-    required: ["intent", "tags", "content", "searchTerms", "confidence"]
+    required: ["intent", "tags", "content", "searchTerms", "confidence"],
+    // replaces and timestamp are optional but should be provided for updates
+    conditionallyRequired: {
+      update: ["replaces"]
+    }
   }
 };
 
@@ -109,23 +127,44 @@ const responseFunction = {
   }
 };
 
-// Updated system prompt for tag-based processing
-const TAGGING_PROMPT = `You are an AI assistant that helps organize and tag shared household knowledge.
+// Updated system prompt for tag-based processing with revision support
+const TAGGING_PROMPT = `You are an AI assistant that helps organize and tag shared knowledge with intelligent revision tracking.
 
 Your job is to:
-1. Determine the user's **intent**: are they storing new information ("store") or retrieving something ("retrieve")?
-2. Return a short list of relevant **tags** (2–4 max) that summarize the topic. Use lowercase single-word terms (e.g., "wifi", "doctor", "insurance", "birthday", "dishwasher").
-3. Clean and return the **content** to store or search.
-4. Extract a list of useful **search terms** for future retrieval.
-5. Provide a **confidence** score between 0.0 and 1.0.
+1. Determine the user's **intent**:
+   - "store": Adding completely new information
+   - "retrieve": Looking for existing information
+   - "update": Changing, correcting, or replacing existing information
+   - "unclear": Cannot determine intent
 
-Examples:
-- "Our doctor is Dr. Ramirez at Westside Pediatrics" → store, tags: ["doctor", "health", "pediatrics"]
-- "Reminder: take the car for inspection July 12" → store, tags: ["car", "reminder", "inspection"] 
-- "Where are the Christmas lights stored?" → retrieve, tags: ["holiday", "storage", "lights"]
-- "What's our WiFi password?" → retrieve, tags: ["wifi", "password"]
+2. **CRITICAL for updates**: Detect update language like:
+   - "We moved/changed/updated the [thing] to [new value]"
+   - "The [thing] is now [new value]" 
+   - "Actually, the [thing] is [new value]"
+   - "Correction: [thing] is [new value]"
+   - "[Thing] changed from [old] to [new]"
 
-Be precise with tagging and generate meaningful search terms.`;
+3. For **updates**, set:
+   - intent: "update"
+   - replaces: The main concept/tag being updated (e.g., "family-reunion", "wifi-password", "doctor")
+   - content: Store the COMPLETE updated information as a full, readable sentence
+   - tags: Same tags as the original concept
+
+4. Return relevant **tags** (2–4 max) using lowercase terms.
+5. Extract useful **search terms**.
+6. Provide **confidence** score (0.0-1.0).
+
+**Examples:**
+- "Our doctor is Dr. Ramirez at Westside Pediatrics" → store, content: "Our doctor is Dr. Ramirez at Westside Pediatrics", tags: ["doctor", "health", "pediatrics"]
+- "We moved the family reunion to July 9" → update, content: "The family reunion is scheduled for July 9", tags: ["family", "reunion", "event"], replaces: "family-reunion"
+- "The WiFi password changed to NewPass123" → update, content: "The WiFi password is NewPass123", tags: ["wifi", "password"], replaces: "wifi-password"  
+- "Actually, the meeting is at 3pm, not 2pm" → update, content: "The meeting is at 3pm", tags: ["meeting", "schedule"], replaces: "meeting"
+- "Where are the Christmas lights?" → retrieve, content: "Where are the Christmas lights?", tags: ["holiday", "storage", "lights"]
+
+**Key Rules**: 
+- For updates: Store COMPLETE information, not just the change! 
+- Watch for change language (moved, changed, updated, actually, correction, now) to detect updates!
+- Always provide full, readable content that stands alone!`;
 
 // Updated system prompt for generating responses with tags
 const RESPONSE_PROMPT = `You are a helpful AI assistant for managing shared household and personal knowledge. 

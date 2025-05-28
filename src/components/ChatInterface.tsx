@@ -90,17 +90,27 @@ export default function ChatInterface({ accountId }: ChatInterfaceProps) {
       
       const processedQuery = await processResponse.json();
       
-      if (processedQuery.intent === 'store') {
-        // Store new information
+      if (processedQuery.intent === 'store' || processedQuery.intent === 'update') {
+        // Store new information or update existing information
         await knowledgeService.addKnowledge({
           content: processedQuery.content,
           tags: processedQuery.tags,
           addedBy: user.uid,
+          // Pass revision fields for updates
+          intent: processedQuery.intent,
+          replaces: processedQuery.replaces,
+          timestamp: processedQuery.timestamp || new Date().toISOString()
         });
+
+        const isUpdate = processedQuery.intent === 'update';
+        const actionWord = isUpdate ? 'updated' : 'saved';
+        const updateNote = isUpdate && processedQuery.replaces 
+          ? ` (replacing previous ${processedQuery.replaces} information)` 
+          : '';
 
         const botMessage: Message = {
           id: (Date.now() + 1).toString(),
-          content: `Perfect! I've saved "${processedQuery.content}" with tags: ${processedQuery.tags.map((tag: string) => `#${tag}`).join(', ')}. You'll be able to find it easily whenever you need it.`,
+          content: `Perfect! I've ${actionWord} "${processedQuery.content}" with tags: ${processedQuery.tags.map((tag: string) => `#${tag}`).join(', ')}${updateNote}. You'll be able to find it easily whenever you need it.`,
           isUser: false,
           timestamp: new Date(),
           suggestions: [
