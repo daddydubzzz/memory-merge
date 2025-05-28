@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import { 
   MessageCircle, 
   Settings, 
@@ -28,41 +28,83 @@ export default function Dashboard({ accountId, onAccountSetup }: DashboardProps)
   const [activeView, setActiveView] = useState('chat');
   const [recentEntries, setRecentEntries] = useState<any[]>([]);
   const [tagStats, setTagStats] = useState<Record<string, number>>({});
+  const [loading, setLoading] = useState(false);
   
-  const knowledgeService = accountId ? new KnowledgeService(accountId) : null;
+  // Memoize knowledge service to prevent recreation on every render
+  const knowledgeService = useMemo(() => 
+    accountId ? new KnowledgeService(accountId) : null, 
+    [accountId]
+  );
 
-  // Load recent entries and tag stats
+  // Memoize expensive computations
+  const topTags = useMemo(() => 
+    Object.entries(tagStats)
+      .sort(([, a], [, b]) => b - a)
+      .slice(0, 10), 
+    [tagStats]
+  );
+
+  // Load recent entries and tag stats (only when accountId changes)
   useEffect(() => {
-    if (knowledgeService && accountId) {
-      const loadData = async () => {
-        const entries = await knowledgeService.getRecentKnowledge(10);
-        setRecentEntries(entries);
-        
-        // Get tag statistics
-        const stats = await getTagStats(accountId);
-        setTagStats(stats);
-      };
-      loadData();
-    }
-  }, [accountId]);
+    if (!knowledgeService || !accountId) return;
 
-  const handleSignOut = async () => {
+    let mounted = true;
+    
+    const loadData = async () => {
+      if (loading) return; // Prevent multiple simultaneous loads
+      
+      setLoading(true);
+      try {
+        // Load both in parallel for better performance
+        const [entries, stats] = await Promise.all([
+          knowledgeService.getRecentKnowledge(10),
+          getTagStats(accountId)
+        ]);
+        
+        if (mounted) {
+          setRecentEntries(entries);
+          setTagStats(stats);
+        }
+      } catch (error) {
+        console.error('Error loading dashboard data:', error);
+      } finally {
+        if (mounted) {
+          setLoading(false);
+        }
+      }
+    };
+
+    loadData();
+
+    return () => {
+      mounted = false;
+    };
+  }, [accountId, knowledgeService]); // Only depend on accountId changes
+
+  // Memoize callbacks to prevent unnecessary re-renders
+  const handleSignOut = useCallback(async () => {
     try {
       await signout();
     } catch (error) {
       console.error('Error signing out:', error);
     }
-  };
+  }, [signout]);
+
+  const handleViewChange = useCallback((view: string) => {
+    setActiveView(view);
+    setSidebarOpen(false);
+  }, []);
+
+  const handleTagClick = useCallback((tag: string) => {
+    // TODO: Implement tag filtering in browse view
+    setActiveView('browse');
+    setSidebarOpen(false);
+  }, []);
 
   // If no account, show setup screen
   if (!accountId) {
     return <AccountSetup onAccountCreated={onAccountSetup} />;
   }
-
-  // Get top tags for display (limit to 10 most used)
-  const topTags = Object.entries(tagStats)
-    .sort(([, a], [, b]) => b - a)
-    .slice(0, 10);
 
   const sidebarContent = (
     <div className="h-full flex flex-col bg-gray-900 text-white">
@@ -81,10 +123,7 @@ export default function Dashboard({ accountId, onAccountSetup }: DashboardProps)
       <nav className="flex-1 p-4">
         <div className="space-y-2">
           <button
-            onClick={() => {
-              setActiveView('chat');
-              setSidebarOpen(false);
-            }}
+            onClick={() => handleViewChange('chat')}
             className={`w-full flex items-center px-3 py-2 rounded-lg transition-colors ${
               activeView === 'chat'
                 ? 'bg-blue-600 text-white'
@@ -96,10 +135,7 @@ export default function Dashboard({ accountId, onAccountSetup }: DashboardProps)
           </button>
 
           <button
-            onClick={() => {
-              setActiveView('browse');
-              setSidebarOpen(false);
-            }}
+            onClick={() => handleViewChange('browse')}
             className={`w-full flex items-center px-3 py-2 rounded-lg transition-colors ${
               activeView === 'browse'
                 ? 'bg-blue-600 text-white'
@@ -111,10 +147,7 @@ export default function Dashboard({ accountId, onAccountSetup }: DashboardProps)
           </button>
 
           <button
-            onClick={() => {
-              setActiveView('settings');
-              setSidebarOpen(false);
-            }}
+            onClick={() => handleViewChange('settings')}
             className={`w-full flex items-center px-3 py-2 rounded-lg transition-colors ${
               activeView === 'settings'
                 ? 'bg-blue-600 text-white'
@@ -135,11 +168,7 @@ export default function Dashboard({ accountId, onAccountSetup }: DashboardProps)
                 <div
                   key={tag}
                   className="flex items-center justify-between text-sm cursor-pointer hover:bg-gray-700 px-2 py-1 rounded"
-                  onClick={() => {
-                    // TODO: Implement tag filtering in browse view
-                    setActiveView('browse');
-                    setSidebarOpen(false);
-                  }}
+                  onClick={() => handleTagClick(tag)}
                 >
                   <span className="text-gray-300">#{tag}</span>
                   <span className="text-gray-500">{count}</span>

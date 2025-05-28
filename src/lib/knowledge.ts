@@ -10,11 +10,18 @@ import {
   updateDoc,
   deleteDoc,
   serverTimestamp,
-  onSnapshot,
-  Timestamp
+  onSnapshot
 } from 'firebase/firestore';
-import { db } from './firebase';
+import { createClient } from '@supabase/supabase-js';
+import { cache, cacheKeys } from './cache';
+import { db } from './firebase'; // Import from existing firebase.ts
 import type { KnowledgeEntry } from './constants';
+
+// Initialize Supabase
+const supabase = createClient(
+  process.env.NEXT_PUBLIC_SUPABASE_URL!,
+  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
+);
 
 export interface Account {
   id?: string;
@@ -84,11 +91,19 @@ export class KnowledgeService {
         // Also store in Firestore for backup/compatibility
         await this.addKnowledgeFirestore(entry);
         
+        // Invalidate caches since we added new data
+        cache.invalidatePattern(this.accountId);
+        
         return result.id;
       } catch (vectorError) {
         console.warn('Vector storage failed, using Firestore only:', vectorError);
         // Fallback to Firestore only
-        return await this.addKnowledgeFirestore(entry);
+        const id = await this.addKnowledgeFirestore(entry);
+        
+        // Invalidate caches for fallback too
+        cache.invalidatePattern(this.accountId);
+        
+        return id;
       }
     } catch (error) {
       console.error('Error adding knowledge:', error);
@@ -107,11 +122,19 @@ export class KnowledgeService {
     return docRef.id;
   }
 
-  // Enhanced search using vector similarity with tag-based filtering
+  // Enhanced search using vector similarity with tag-based filtering and caching
   async searchKnowledge(searchTerms: string[], tags?: string[]): Promise<KnowledgeEntry[]> {
+    const searchQuery = searchTerms.join(' ');
+    const cacheKey = cacheKeys.searchResults(this.accountId, searchQuery, tags);
+    
+    // Check cache first (2 minute TTL for search results)
+    const cached = cache.get<KnowledgeEntry[]>(cacheKey);
+    if (cached) {
+      console.log('🔍 Search results served from cache');
+      return cached;
+    }
+
     try {
-      const searchQuery = searchTerms.join(' ');
-      
       // Try vector search first via API
       try {
         const result = await callSearchAPI('search', {
@@ -136,8 +159,9 @@ export class KnowledgeService {
           accountId: this.accountId
         }));
 
-        // If we have good vector results, return them
+        // If we have good vector results, cache and return them
         if (knowledgeEntries.length > 0) {
+          cache.set(cacheKey, knowledgeEntries, 2); // 2 minute cache
           console.log(`🔍 Vector search found ${knowledgeEntries.length} results`);
           return knowledgeEntries;
         }
@@ -146,7 +170,12 @@ export class KnowledgeService {
       }
 
       // Fallback to original Firestore search with tag filtering
-      return await this.searchKnowledgeFirestore(searchTerms, tags);
+      const results = await this.searchKnowledgeFirestore(searchTerms, tags);
+      
+      // Cache Firestore results too (shorter TTL)
+      cache.set(cacheKey, results, 1); // 1 minute cache for fallback
+      
+      return results;
 
     } catch (error) {
       console.error('Error searching knowledge:', error);
@@ -197,9 +226,45 @@ export class KnowledgeService {
     return entries;
   }
 
-  // Get recent knowledge entries
+  // Get recent knowledge entries with caching and efficient API calls
   async getRecentKnowledge(limitCount: number = 10): Promise<KnowledgeEntry[]> {
+    const cacheKey = cacheKeys.recentEntries(this.accountId, limitCount);
+    
+    // Check cache first (5 minute TTL)
+    const cached = cache.get<KnowledgeEntry[]>(cacheKey);
+    if (cached) {
+      console.log('📚 Recent entries served from cache');
+      return cached;
+    }
+
     try {
+      // Try efficient Supabase API first
+      try {
+        const result = await callSearchAPI('recent', {
+          accountId: this.accountId,
+          options: { limit: limitCount }
+        });
+
+        const entries: KnowledgeEntry[] = result.results.map((item: any) => ({
+          id: item.id,
+          content: item.content,
+          tags: item.tags,
+          addedBy: item.addedBy,
+          createdAt: new Date(item.createdAt),
+          updatedAt: new Date(item.updatedAt),
+          accountId: this.accountId
+        }));
+
+        // Cache for 5 minutes
+        cache.set(cacheKey, entries, 5);
+        console.log('📚 Recent entries loaded from Supabase API');
+        return entries;
+
+      } catch (apiError) {
+        console.warn('Supabase API failed, falling back to Firestore:', apiError);
+      }
+
+      // Fallback to direct Firestore query
       const knowledgeRef = collection(db, 'knowledge');
       const q = query(
         knowledgeRef,
@@ -209,12 +274,18 @@ export class KnowledgeService {
       );
 
       const snapshot = await getDocs(q);
-      return snapshot.docs.map(doc => ({
+      const entries = snapshot.docs.map(doc => ({
         id: doc.id,
         ...doc.data(),
         createdAt: doc.data().createdAt?.toDate() || new Date(),
         updatedAt: doc.data().updatedAt?.toDate() || new Date(),
       })) as KnowledgeEntry[];
+
+      // Cache for 3 minutes (shorter for fallback)
+      cache.set(cacheKey, entries, 3);
+      console.log('📚 Recent entries loaded from Firestore fallback');
+      
+      return entries;
     } catch (error) {
       console.error('Error getting recent knowledge:', error);
       return [];
@@ -368,11 +439,41 @@ export async function joinAccount(accountId: string, userId: string): Promise<vo
   }
 }
 
-// Utility function to get tag statistics
+// Optimized utility function to get tag statistics with caching
 export async function getTagStats(accountId: string): Promise<Record<string, number>> {
+  const cacheKey = cacheKeys.tagStats(accountId);
+  
+  // Check cache first
+  const cached = cache.get<Record<string, number>>(cacheKey);
+  if (cached) {
+    console.log('📊 Tag stats served from cache');
+    return cached;
+  }
+
+  try {
+    // Try efficient Supabase SQL function first
+    const { data, error } = await supabase
+      .rpc('get_tag_stats', { account_id_param: accountId });
+
+    if (!error && data) {
+      const stats: Record<string, number> = {};
+      data.forEach((row: { tag: string; count: number }) => {
+        stats[row.tag] = row.count;
+      });
+      
+      // Cache for 10 minutes
+      cache.set(cacheKey, stats, 10);
+      console.log('📊 Tag stats loaded from Supabase');
+      return stats;
+    }
+  } catch (supabaseError) {
+    console.warn('Supabase tag stats failed, falling back to Firestore:', supabaseError);
+  }
+
+  // Fallback to Firestore (less efficient but reliable)
   try {
     const knowledgeService = new KnowledgeService(accountId);
-    const entries = await knowledgeService.getRecentKnowledge(1000); // Get all entries
+    const entries = await knowledgeService.getRecentKnowledge(500); // Reduced from 1000
     
     const stats: Record<string, number> = {};
     entries.forEach(entry => {
@@ -381,6 +482,9 @@ export async function getTagStats(accountId: string): Promise<Record<string, num
       });
     });
     
+    // Cache for 5 minutes (shorter for fallback)
+    cache.set(cacheKey, stats, 5);
+    console.log('📊 Tag stats calculated from Firestore');
     return stats;
   } catch (error) {
     console.error('Error getting tag stats:', error);
