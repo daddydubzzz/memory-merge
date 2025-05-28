@@ -1,6 +1,7 @@
 import OpenAI from 'openai';
 import { z } from 'zod';
 import type { KnowledgeEntry } from './constants';
+import { CATEGORY_TO_TAGS_MAP } from './constants';
 
 // Create OpenAI client - this should only be used server-side
 function createOpenAIClient() {
@@ -12,10 +13,10 @@ function createOpenAIClient() {
 // Export interfaces from constants
 export type { KnowledgeEntry } from './constants';
 
-// Zod schemas for validation
+// Updated Zod schemas for tag-based validation
 const ProcessedQuerySchema = z.object({
   intent: z.enum(['store', 'retrieve', 'unclear']),
-  category: z.string(),
+  tags: z.array(z.string()).min(1).max(4),
   content: z.string(),
   searchTerms: z.array(z.string()),
   confidence: z.number().min(0).max(1)
@@ -29,7 +30,7 @@ const QueryResponseSchema = z.object({
 
 export interface ProcessedQuery {
   intent: 'store' | 'retrieve' | 'unclear';
-  category: string;
+  tags: string[];
   content: string;
   searchTerms: string[];
   confidence: number;
@@ -42,10 +43,10 @@ export interface QueryResponse {
   suggestions: string[];
 }
 
-// Function definition for categorization
-const categorizationFunction = {
+// Updated function definition for tag-based processing
+const tagProcessingFunction = {
   name: "process_user_input",
-  description: "Analyze user input to determine intent and categorize information for a household knowledge management system",
+  description: "Analyze user input to determine intent and generate relevant tags for a household knowledge management system",
   parameters: {
     type: "object",
     properties: {
@@ -54,24 +55,12 @@ const categorizationFunction = {
         enum: ["store", "retrieve", "unclear"],
         description: "Whether the user wants to store new information, retrieve existing information, or intent is unclear"
       },
-      category: {
-        type: "string",
-        description: "The category that best fits this information",
-        enum: [
-          "Tasks & Reminders",
-          "Home Maintenance", 
-          "Documents",
-          "Schedules & Events",
-          "Shopping",
-          "Travel",
-          "Personal Notes",
-          "Household Items",
-          "Finance",
-          "Health & Medical",
-          "Contacts",
-          "Passwords & Accounts",
-          "Other"
-        ]
+      tags: {
+        type: "array",
+        items: { type: "string" },
+        minItems: 1,
+        maxItems: 4,
+        description: "2-4 relevant tags that summarize the topic. Use lowercase single-word terms (e.g., 'wifi', 'doctor', 'insurance', 'birthday', 'dishwasher')"
       },
       content: {
         type: "string",
@@ -86,14 +75,14 @@ const categorizationFunction = {
         type: "number",
         minimum: 0,
         maximum: 1,
-        description: "Confidence level in the categorization"
+        description: "Confidence level in the tagging and processing"
       }
     },
-    required: ["intent", "category", "content", "searchTerms", "confidence"]
+    required: ["intent", "tags", "content", "searchTerms", "confidence"]
   }
 };
 
-// Function definition for response generation
+// Function definition for response generation (updated for tags)
 const responseFunction = {
   name: "generate_response",
   description: "Generate a helpful, conversational response based on user query and available information",
@@ -120,24 +109,25 @@ const responseFunction = {
   }
 };
 
-// System prompt for categorizing and processing knowledge entries
-const CATEGORIZATION_PROMPT = `You are an AI assistant that helps people organize and categorize their shared household and personal information. 
+// Updated system prompt for tag-based processing
+const TAGGING_PROMPT = `You are an AI assistant that helps organize and tag shared household knowledge.
 
-Analyze the user's input and determine:
-1. Intent: Is this storing new information ('store') or retrieving existing information ('retrieve')?
-2. Category: What category does this belong to? Choose the most appropriate one.
-3. For storage: Extract the key information to store cleanly
-4. For retrieval: Use the original query as content and generate search terms
+Your job is to:
+1. Determine the user's **intent**: are they storing new information ("store") or retrieving something ("retrieve")?
+2. Return a short list of relevant **tags** (2–4 max) that summarize the topic. Use lowercase single-word terms (e.g., "wifi", "doctor", "insurance", "birthday", "dishwasher").
+3. Clean and return the **content** to store or search.
+4. Extract a list of useful **search terms** for future retrieval.
+5. Provide a **confidence** score between 0.0 and 1.0.
 
 Examples:
-- "Remind me to get golf balls tomorrow" → store, Tasks & Reminders
-- "I need to send back Stitch Fix items" → store, Tasks & Reminders  
-- "Where did we put the Christmas decorations?" → retrieve, Household Items
-- "What's our WiFi password?" → retrieve, Passwords & Accounts
+- "Our doctor is Dr. Ramirez at Westside Pediatrics" → store, tags: ["doctor", "health", "pediatrics"]
+- "Reminder: take the car for inspection July 12" → store, tags: ["car", "reminder", "inspection"] 
+- "Where are the Christmas lights stored?" → retrieve, tags: ["holiday", "storage", "lights"]
+- "What's our WiFi password?" → retrieve, tags: ["wifi", "password"]
 
-Be precise with categorization and generate meaningful search terms.`;
+Be precise with tagging and generate meaningful search terms.`;
 
-// System prompt for generating responses to queries
+// Updated system prompt for generating responses with tags
 const RESPONSE_PROMPT = `You are a helpful AI assistant for managing shared household and personal knowledge. 
 
 Given a user's query and relevant knowledge entries, provide a helpful, conversational response. 
@@ -150,6 +140,7 @@ Guidelines:
 - Keep responses concise but complete
 - Don't assume specific relationships (could be family, roommates, partners, etc.)
 - Make the experience personal to the current user
+- When referencing entries, show their tags like: 🏷️ [wifi, password]: "The WiFi password is..."
 
 Provide 2-3 helpful follow-up suggestions that make sense in context.`;
 
@@ -159,10 +150,10 @@ export async function processUserInput(input: string): Promise<ProcessedQuery> {
     const completion = await openai.chat.completions.create({
       model: "gpt-4o-mini",
       messages: [
-        { role: "system", content: CATEGORIZATION_PROMPT },
+        { role: "system", content: TAGGING_PROMPT },
         { role: "user", content: input }
       ],
-      tools: [{ type: "function", function: categorizationFunction }],
+      tools: [{ type: "function", function: tagProcessingFunction }],
       tool_choice: { type: "function", function: { name: "process_user_input" } },
       temperature: 0.3,
       max_tokens: 500,
@@ -176,31 +167,43 @@ export async function processUserInput(input: string): Promise<ProcessedQuery> {
     const rawResult = JSON.parse(toolCall.function.arguments);
     const validatedResult = ProcessedQuerySchema.parse(rawResult);
     
+    // Debug logging for development
+    console.log('🏷️ AI Tagging Results:', {
+      input,
+      tags: validatedResult.tags,
+      intent: validatedResult.intent,
+      confidence: validatedResult.confidence
+    });
+    
     return validatedResult;
   } catch (error) {
     console.error('Error processing user input:', error);
     
-    // Enhanced fallback with better categorization
+    // Enhanced fallback with tag-based categorization
     const lowerInput = input.toLowerCase();
-    let category = 'Other';
+    let fallbackTags = ['misc'];
     
-    // Simple keyword-based fallback categorization
-    if (lowerInput.includes('remind') || lowerInput.includes('remember') || lowerInput.includes('need to') || lowerInput.includes('return')) {
-      category = 'Tasks & Reminders';
+    // Simple keyword-based fallback tagging
+    if (lowerInput.includes('remind') || lowerInput.includes('remember') || lowerInput.includes('need to')) {
+      fallbackTags = ['reminder', 'task'];
     } else if (lowerInput.includes('where') || lowerInput.includes('put') || lowerInput.includes('stored')) {
-      category = 'Household Items';
-    } else if (lowerInput.includes('password') || lowerInput.includes('wifi') || lowerInput.includes('account')) {
-      category = 'Passwords & Accounts';
-    } else if (lowerInput.includes('appointment') || lowerInput.includes('meeting') || lowerInput.includes('schedule')) {
-      category = 'Schedules & Events';
+      fallbackTags = ['storage', 'location'];
+    } else if (lowerInput.includes('password') || lowerInput.includes('wifi')) {
+      fallbackTags = ['password', 'wifi'];
+    } else if (lowerInput.includes('appointment') || lowerInput.includes('meeting')) {
+      fallbackTags = ['appointment', 'schedule'];
+    } else if (lowerInput.includes('doctor') || lowerInput.includes('health')) {
+      fallbackTags = ['health', 'medical'];
+    } else if (lowerInput.includes('car') || lowerInput.includes('vehicle')) {
+      fallbackTags = ['car', 'vehicle'];
     }
     
     return {
       intent: 'unclear',
-      category,
+      tags: fallbackTags,
       content: input,
-      searchTerms: input.split(' ').filter(word => word.length > 2),
-      confidence: 0.1
+      searchTerms: input.split(' ').filter(word => word.length > 3),
+      confidence: 0.3
     };
   }
 }
@@ -213,7 +216,7 @@ export async function generateResponse(
     const openai = createOpenAIClient();
     const context = relevantEntries.length > 0 
       ? `Relevant information found:\n${relevantEntries.map(entry => 
-          `- ${entry.category}: ${entry.content}`
+          `🏷️ [${entry.tags.join(', ')}]: ${entry.content}`
         ).join('\n')}`
       : 'No specific information found in the knowledge base.';
 
@@ -236,6 +239,14 @@ export async function generateResponse(
 
     const rawResult = JSON.parse(toolCall.function.arguments);
     const validatedResult = QueryResponseSchema.parse(rawResult);
+    
+    // Debug logging for development
+    console.log('🤖 AI Response Generated:', {
+      query,
+      confidence: validatedResult.confidence,
+      sources: relevantEntries.length,
+      tags: relevantEntries.map(e => e.tags).flat()
+    });
     
     return {
       answer: validatedResult.answer,
@@ -276,7 +287,4 @@ export async function generateResponse(
       };
     }
   }
-}
-
-// Import categories from constants
-export { KNOWLEDGE_CATEGORIES, type KnowledgeCategory } from './constants'; 
+} 

@@ -107,8 +107,8 @@ export class KnowledgeService {
     return docRef.id;
   }
 
-  // Enhanced search using vector similarity
-  async searchKnowledge(searchTerms: string[], categories?: string[]): Promise<KnowledgeEntry[]> {
+  // Enhanced search using vector similarity with tag-based filtering
+  async searchKnowledge(searchTerms: string[], tags?: string[]): Promise<KnowledgeEntry[]> {
     try {
       const searchQuery = searchTerms.join(' ');
       
@@ -117,7 +117,7 @@ export class KnowledgeService {
         const result = await callSearchAPI('search', {
           accountId: this.accountId,
           query: searchQuery,
-          categories,
+          tags, // Pass tags for filtering
           options: {
             matchThreshold: 0.4, // Lower threshold for more results
             matchCount: 20,
@@ -129,7 +129,6 @@ export class KnowledgeService {
         const knowledgeEntries: KnowledgeEntry[] = result.results.map((vectorResult: any) => ({
           id: vectorResult.id,
           content: vectorResult.content,
-          category: vectorResult.category,
           tags: vectorResult.tags,
           addedBy: vectorResult.addedBy,
           createdAt: new Date(vectorResult.createdAt),
@@ -139,15 +138,15 @@ export class KnowledgeService {
 
         // If we have good vector results, return them
         if (knowledgeEntries.length > 0) {
-          console.log(`Vector search found ${knowledgeEntries.length} results`);
+          console.log(`🔍 Vector search found ${knowledgeEntries.length} results`);
           return knowledgeEntries;
         }
       } catch (vectorError) {
         console.warn('Vector search failed, falling back to Firestore:', vectorError);
       }
 
-      // Fallback to original Firestore search
-      return await this.searchKnowledgeFirestore(searchTerms, categories);
+      // Fallback to original Firestore search with tag filtering
+      return await this.searchKnowledgeFirestore(searchTerms, tags);
 
     } catch (error) {
       console.error('Error searching knowledge:', error);
@@ -155,8 +154,8 @@ export class KnowledgeService {
     }
   }
 
-  // Original Firestore search method (kept as fallback)
-  private async searchKnowledgeFirestore(searchTerms: string[], categories?: string[]): Promise<KnowledgeEntry[]> {
+  // Updated Firestore search method with tag-based filtering
+  private async searchKnowledgeFirestore(searchTerms: string[], tags?: string[]): Promise<KnowledgeEntry[]> {
     const knowledgeRef = collection(db, 'knowledge');
     let q = query(
       knowledgeRef,
@@ -165,11 +164,12 @@ export class KnowledgeService {
       limit(20)
     );
 
-    if (categories && categories.length > 0) {
+    // Use tag-based filtering if tags are provided
+    if (tags && tags.length > 0) {
       q = query(
         knowledgeRef,
         where('accountId', '==', this.accountId),
-        where('category', 'in', categories),
+        where('tags', 'array-contains-any', tags),
         orderBy('createdAt', 'desc'),
         limit(20)
       );
@@ -183,10 +183,10 @@ export class KnowledgeService {
       updatedAt: doc.data().updatedAt?.toDate() || new Date(),
     })) as KnowledgeEntry[];
 
-    // Client-side filtering for text search (Firestore doesn't support full-text search)
+    // Client-side filtering for text search
     if (searchTerms.length > 0) {
       const filteredEntries = entries.filter(entry => {
-        const searchText = `${entry.content} ${entry.category} ${entry.tags.join(' ')}`.toLowerCase();
+        const searchText = `${entry.content} ${entry.tags.join(' ')}`.toLowerCase();
         return searchTerms.some(term => 
           searchText.includes(term.toLowerCase())
         );
@@ -221,14 +221,14 @@ export class KnowledgeService {
     }
   }
 
-  // Get knowledge by category
-  async getKnowledgeByCategory(category: string): Promise<KnowledgeEntry[]> {
+  // Get knowledge by specific tags
+  async getKnowledgeByTags(tags: string[]): Promise<KnowledgeEntry[]> {
     try {
       const knowledgeRef = collection(db, 'knowledge');
       const q = query(
         knowledgeRef,
         where('accountId', '==', this.accountId),
-        where('category', '==', category),
+        where('tags', 'array-contains-any', tags),
         orderBy('createdAt', 'desc')
       );
 
@@ -240,7 +240,7 @@ export class KnowledgeService {
         updatedAt: doc.data().updatedAt?.toDate() || new Date(),
       })) as KnowledgeEntry[];
     } catch (error) {
-      console.error('Error getting knowledge by category:', error);
+      console.error('Error getting knowledge by tags:', error);
       return [];
     }
   }
@@ -249,13 +249,12 @@ export class KnowledgeService {
   async updateKnowledge(id: string, updates: Partial<Omit<KnowledgeEntry, 'id' | 'createdAt' | 'accountId'>>): Promise<void> {
     try {
       // Try to update vector embedding if content changed
-      if (updates.content || updates.category || updates.tags) {
+      if (updates.content || updates.tags) {
         try {
           await callKnowledgeAPI('update', {
             id,
             updates: {
               content: updates.content,
-              category: updates.category,
               tags: updates.tags
             }
           });
@@ -369,20 +368,22 @@ export async function joinAccount(accountId: string, userId: string): Promise<vo
   }
 }
 
-// Utility function to get category statistics
-export async function getCategoryStats(accountId: string): Promise<Record<string, number>> {
+// Utility function to get tag statistics
+export async function getTagStats(accountId: string): Promise<Record<string, number>> {
   try {
     const knowledgeService = new KnowledgeService(accountId);
     const entries = await knowledgeService.getRecentKnowledge(1000); // Get all entries
     
     const stats: Record<string, number> = {};
     entries.forEach(entry => {
-      stats[entry.category] = (stats[entry.category] || 0) + 1;
+      entry.tags.forEach(tag => {
+        stats[tag] = (stats[tag] || 0) + 1;
+      });
     });
     
     return stats;
   } catch (error) {
-    console.error('Error getting category stats:', error);
+    console.error('Error getting tag stats:', error);
     return {};
   }
 } 

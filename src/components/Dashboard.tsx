@@ -13,8 +13,8 @@ import {
   Heart
 } from 'lucide-react';
 import { useAuth } from '@/contexts/AuthContext';
-import { getAccountByMember, createAccount, KnowledgeService } from '@/lib/knowledge';
-import { KNOWLEDGE_CATEGORIES } from '@/lib/constants';
+import { getAccountByMember, createAccount, KnowledgeService, getTagStats } from '@/lib/knowledge';
+import { SUGGESTED_TAGS } from '@/lib/constants';
 import ChatInterface from './ChatInterface';
 
 interface DashboardProps {
@@ -27,23 +27,20 @@ export default function Dashboard({ accountId, onAccountSetup }: DashboardProps)
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [activeView, setActiveView] = useState('chat');
   const [recentEntries, setRecentEntries] = useState<any[]>([]);
-  const [categoryStats, setCategoryStats] = useState<Record<string, number>>({});
+  const [tagStats, setTagStats] = useState<Record<string, number>>({});
   
   const knowledgeService = accountId ? new KnowledgeService(accountId) : null;
 
-  // Load recent entries and stats
+  // Load recent entries and tag stats
   useEffect(() => {
-    if (knowledgeService) {
+    if (knowledgeService && accountId) {
       const loadData = async () => {
         const entries = await knowledgeService.getRecentKnowledge(10);
         setRecentEntries(entries);
         
-        // Calculate category stats
-        const stats: Record<string, number> = {};
-        entries.forEach((entry: any) => {
-          stats[entry.category] = (stats[entry.category] || 0) + 1;
-        });
-        setCategoryStats(stats);
+        // Get tag statistics
+        const stats = await getTagStats(accountId);
+        setTagStats(stats);
       };
       loadData();
     }
@@ -61,6 +58,11 @@ export default function Dashboard({ accountId, onAccountSetup }: DashboardProps)
   if (!accountId) {
     return <AccountSetup onAccountCreated={onAccountSetup} />;
   }
+
+  // Get top tags for display (limit to 10 most used)
+  const topTags = Object.entries(tagStats)
+    .sort(([, a], [, b]) => b - a)
+    .slice(0, 10);
 
   const sidebarContent = (
     <div className="h-full flex flex-col bg-gray-900 text-white">
@@ -124,19 +126,28 @@ export default function Dashboard({ accountId, onAccountSetup }: DashboardProps)
           </button>
         </div>
 
-        {/* Category Stats */}
+        {/* Popular Tags */}
         <div className="mt-8">
-          <h3 className="text-sm font-medium text-gray-400 mb-3">Categories</h3>
+          <h3 className="text-sm font-medium text-gray-400 mb-3">Popular Tags</h3>
           <div className="space-y-2">
-            {KNOWLEDGE_CATEGORIES.map((category) => (
-              <div
-                key={category}
-                className="flex items-center justify-between text-sm"
-              >
-                <span className="text-gray-300">{category}</span>
-                <span className="text-gray-500">{categoryStats[category] || 0}</span>
-              </div>
-            ))}
+            {topTags.length > 0 ? (
+              topTags.map(([tag, count]) => (
+                <div
+                  key={tag}
+                  className="flex items-center justify-between text-sm cursor-pointer hover:bg-gray-700 px-2 py-1 rounded"
+                  onClick={() => {
+                    // TODO: Implement tag filtering in browse view
+                    setActiveView('browse');
+                    setSidebarOpen(false);
+                  }}
+                >
+                  <span className="text-gray-300">#{tag}</span>
+                  <span className="text-gray-500">{count}</span>
+                </div>
+              ))
+            ) : (
+              <p className="text-sm text-gray-500">No tags yet</p>
+            )}
           </div>
         </div>
       </nav>

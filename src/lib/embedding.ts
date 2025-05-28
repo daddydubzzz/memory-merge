@@ -62,7 +62,6 @@ export async function storeWithEmbedding(
       .insert({
         account_id: accountId,
         content: entry.content,
-        category: entry.category,
         tags: entry.tags,
         added_by: entry.addedBy,
         embedding: embedding,
@@ -91,7 +90,7 @@ export async function storeWithEmbedding(
  */
 export async function updateWithEmbedding(
   id: string,
-  updates: { content?: string; category?: string; tags?: string[] }
+  updates: { content?: string; tags?: string[] }
 ): Promise<void> {
   try {
     let embedding: number[] | undefined;

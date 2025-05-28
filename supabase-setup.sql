@@ -15,15 +15,6 @@ create table if not exists knowledge_vectors (
 );
 
 -- 3. Add missing columns if they don't exist (for existing tables)
--- Add category column if it doesn't exist
-DO $$ 
-BEGIN 
-    IF NOT EXISTS (SELECT 1 FROM information_schema.columns 
-                   WHERE table_name = 'knowledge_vectors' AND column_name = 'category') THEN
-        ALTER TABLE knowledge_vectors ADD COLUMN category text not null default 'Other';
-    END IF;
-END $$;
-
 -- Add tags column if it doesn't exist
 DO $$ 
 BEGIN 
@@ -51,16 +42,28 @@ BEGIN
     END IF;
 END $$;
 
--- 4. Create indexes for better performance
+-- 4. Remove category column if it exists (migration to tags)
+DO $$ 
+BEGIN 
+    IF EXISTS (SELECT 1 FROM information_schema.columns 
+               WHERE table_name = 'knowledge_vectors' AND column_name = 'category') THEN
+        ALTER TABLE knowledge_vectors DROP COLUMN category;
+    END IF;
+END $$;
+
+-- 5. Create indexes for better performance
 create index if not exists knowledge_vectors_account_id_idx on knowledge_vectors (account_id);
-create index if not exists knowledge_vectors_category_idx on knowledge_vectors (category);
+create index if not exists knowledge_vectors_tags_idx on knowledge_vectors using gin (tags);
 create index if not exists knowledge_vectors_created_at_idx on knowledge_vectors (created_at desc);
 
--- 5. Create vector similarity index for fast searching
+-- 6. Create vector similarity index for fast searching
 create index if not exists knowledge_vectors_embedding_idx on knowledge_vectors 
 using hnsw (embedding vector_cosine_ops);
 
--- 6. Create the vector similarity search function
+-- 7. Create the vector similarity search function
+-- Drop existing function if it exists (for schema migration)
+DROP FUNCTION IF EXISTS match_knowledge_vectors(vector, text, double precision, integer);
+
 CREATE OR REPLACE FUNCTION match_knowledge_vectors(
   query_embedding vector(1536),
   account_id text,
@@ -71,7 +74,6 @@ RETURNS TABLE (
   id text,
   account_id text,
   content text,
-  category text,
   tags text[],
   added_by text,
   created_at timestamptz,
@@ -84,7 +86,6 @@ AS $$
     knowledge_vectors.id,
     knowledge_vectors.account_id,
     knowledge_vectors.content,
-    knowledge_vectors.category,
     knowledge_vectors.tags,
     knowledge_vectors.added_by,
     knowledge_vectors.created_at,
@@ -97,50 +98,61 @@ AS $$
   LIMIT match_count;
 $$;
 
--- 7. Enable Row Level Security (RLS) for data protection
+-- 8. Enable Row Level Security (RLS) for data protection
 alter table knowledge_vectors enable row level security;
 
--- 8. Create RLS policies (adjust based on your auth setup)
+-- 9. Create RLS policies (adjust based on your auth setup)
 -- Note: You'll need to adjust these policies based on how you handle authentication
 -- For now, this allows all authenticated users to access data for their account
 
+-- Drop existing policies if they exist (for clean migration)
+DROP POLICY IF EXISTS "Users can view knowledge for their account" ON knowledge_vectors;
+DROP POLICY IF EXISTS "Users can insert knowledge for their account" ON knowledge_vectors;
+DROP POLICY IF EXISTS "Users can update knowledge for their account" ON knowledge_vectors;
+DROP POLICY IF EXISTS "Users can delete knowledge for their account" ON knowledge_vectors;
+
 -- Policy for SELECT operations
-create policy "Users can view knowledge for their account" on knowledge_vectors
-  for select using (true); -- Adjust this based on your auth implementation
+CREATE POLICY "Users can view knowledge for their account" ON knowledge_vectors
+  FOR SELECT USING (true); -- Adjust this based on your auth implementation
 
 -- Policy for INSERT operations  
-create policy "Users can insert knowledge for their account" on knowledge_vectors
-  for insert with check (true); -- Adjust this based on your auth implementation
+CREATE POLICY "Users can insert knowledge for their account" ON knowledge_vectors
+  FOR INSERT WITH CHECK (true); -- Adjust this based on your auth implementation
 
 -- Policy for UPDATE operations
-create policy "Users can update knowledge for their account" on knowledge_vectors
-  for update using (true); -- Adjust this based on your auth implementation
+CREATE POLICY "Users can update knowledge for their account" ON knowledge_vectors
+  FOR UPDATE USING (true); -- Adjust this based on your auth implementation
 
 -- Policy for DELETE operations
-create policy "Users can delete knowledge for their account" on knowledge_vectors
-  for delete using (true); -- Adjust this based on your auth implementation
+CREATE POLICY "Users can delete knowledge for their account" ON knowledge_vectors
+  FOR DELETE USING (true); -- Adjust this based on your auth implementation
 
--- 9. Grant necessary permissions
+-- 10. Grant necessary permissions
 grant usage on schema public to anon, authenticated;
 grant all on knowledge_vectors to anon, authenticated;
 grant execute on function match_knowledge_vectors to anon, authenticated;
 
--- 10. Create helpful utility functions
+-- 11. Create helpful utility functions
 
--- Function to get category statistics
-CREATE OR REPLACE FUNCTION get_category_stats(account_id_param text)
+-- Drop existing utility functions if they exist (for schema migration)
+DROP FUNCTION IF EXISTS get_category_stats(text);
+DROP FUNCTION IF EXISTS get_recent_knowledge(text, integer);
+DROP FUNCTION IF EXISTS get_recent_knowledge(text);
+
+-- Function to get tag statistics
+CREATE OR REPLACE FUNCTION get_tag_stats(account_id_param text)
 RETURNS TABLE (
-  category text,
+  tag text,
   count bigint
 )
 LANGUAGE sql STABLE
 AS $$
   SELECT 
-    category,
+    unnest(tags) as tag,
     COUNT(*) as count
   FROM knowledge_vectors 
   WHERE account_id = account_id_param
-  GROUP BY category
+  GROUP BY tag
   ORDER BY count DESC;
 $$;
 
@@ -152,7 +164,6 @@ CREATE OR REPLACE FUNCTION get_recent_knowledge(
 RETURNS TABLE (
   id text,
   content text,
-  category text,
   tags text[],
   added_by text,
   created_at timestamptz,
@@ -163,7 +174,6 @@ AS $$
   SELECT 
     id,
     content,
-    category,
     tags,
     added_by,
     created_at,
@@ -174,8 +184,41 @@ AS $$
   LIMIT limit_count;
 $$;
 
--- Grant execute permissions on utility functions
-grant execute on function get_category_stats to anon, authenticated;
-grant execute on function get_recent_knowledge to anon, authenticated;
+-- Function to search by tags
+CREATE OR REPLACE FUNCTION search_by_tags(
+  account_id_param text,
+  search_tags text[],
+  limit_count int DEFAULT 20
+)
+RETURNS TABLE (
+  id text,
+  content text,
+  tags text[],
+  added_by text,
+  created_at timestamptz,
+  updated_at timestamptz,
+  tag_matches int
+)
+LANGUAGE sql STABLE
+AS $$
+  SELECT 
+    id,
+    content,
+    tags,
+    added_by,
+    created_at,
+    updated_at,
+    array_length(array(select unnest(tags) intersect select unnest(search_tags)), 1) as tag_matches
+  FROM knowledge_vectors 
+  WHERE account_id = account_id_param
+    AND tags && search_tags  -- Array overlap operator
+  ORDER BY tag_matches DESC, created_at DESC
+  LIMIT limit_count;
+$$;
 
--- Setup complete! You can now use the vector search functionality. 
+-- Grant execute permissions on utility functions
+grant execute on function get_tag_stats to anon, authenticated;
+grant execute on function get_recent_knowledge to anon, authenticated;
+grant execute on function search_by_tags to anon, authenticated;
+
+-- Setup complete! You can now use the tag-based vector search functionality. 

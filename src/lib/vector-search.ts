@@ -23,7 +23,6 @@ const EmbeddingResponseSchema = z.object({
 export interface VectorSearchResult {
   id: string;
   content: string;
-  category: string;
   tags: string[];
   addedBy: string;
   createdAt: Date;
@@ -98,7 +97,6 @@ export async function searchKnowledgeVector(
     return data.map((item: any) => ({
       id: item.id,
       content: item.content,
-      category: item.category,
       tags: item.tags || [],
       addedBy: item.added_by,
       createdAt: new Date(item.created_at),
@@ -116,7 +114,7 @@ export async function searchKnowledgeVector(
 }
 
 /**
- * Search with fallback to keyword search if vector search returns few results
+ * Search with tag-based filtering and fallback to keyword search if vector search returns few results
  */
 export async function hybridSearch(
   accountId: string,
@@ -125,13 +123,15 @@ export async function hybridSearch(
     matchThreshold?: number;
     matchCount?: number;
     minResults?: number;
+    tags?: string[]; // Add tag filtering option
   } = {}
 ): Promise<VectorSearchResult[]> {
   try {
     const {
       matchThreshold = 0.5,
       matchCount = 10,
-      minResults = 3
+      minResults = 3,
+      tags
     } = options;
 
     // First try vector search
@@ -140,9 +140,17 @@ export async function hybridSearch(
       matchCount
     });
 
+    // Apply tag-based filtering if specified
+    let filteredResults = vectorResults;
+    if (tags && tags.length > 0) {
+      filteredResults = vectorResults.filter(result => 
+        tags.some(tag => result.tags.includes(tag))
+      );
+    }
+
     // If we have enough results, return them
-    if (vectorResults.length >= minResults) {
-      return vectorResults;
+    if (filteredResults.length >= minResults) {
+      return filteredResults;
     }
 
     // Otherwise, try with a lower threshold for more results
@@ -150,6 +158,13 @@ export async function hybridSearch(
       matchThreshold: Math.max(0.3, matchThreshold - 0.2),
       matchCount: matchCount * 2
     });
+
+    // Apply tag filtering to relaxed results too
+    if (tags && tags.length > 0) {
+      return relaxedResults.filter(result => 
+        tags.some(tag => result.tags.includes(tag))
+      );
+    }
 
     return relaxedResults;
 
@@ -186,7 +201,6 @@ export async function getRecentKnowledgeVectors(
     return data.map(item => ({
       id: item.id,
       content: item.content,
-      category: item.category,
       tags: item.tags || [],
       addedBy: item.added_by,
       createdAt: new Date(item.created_at),
@@ -201,23 +215,23 @@ export async function getRecentKnowledgeVectors(
 }
 
 /**
- * Get knowledge entries by category
+ * Get knowledge entries by tags
  */
-export async function getKnowledgeVectorsByCategory(
+export async function getKnowledgeVectorsByTags(
   accountId: string,
-  category: string
+  tags: string[]
 ): Promise<VectorSearchResult[]> {
   try {
     const { data, error } = await supabase
       .from('knowledge_vectors')
       .select('*')
       .eq('account_id', accountId)
-      .eq('category', category)
+      .overlaps('tags', tags)
       .order('created_at', { ascending: false });
 
     if (error) {
       console.error('Supabase query error:', error);
-      throw new Error(`Failed to fetch entries by category: ${error.message}`);
+      throw new Error(`Failed to fetch entries by tags: ${error.message}`);
     }
 
     if (!data) {
@@ -227,16 +241,15 @@ export async function getKnowledgeVectorsByCategory(
     return data.map(item => ({
       id: item.id,
       content: item.content,
-      category: item.category,
       tags: item.tags || [],
       addedBy: item.added_by,
       createdAt: new Date(item.created_at),
       updatedAt: new Date(item.updated_at),
-      similarity: 1.0 // Not applicable for category browsing
+      similarity: 1.0 // Not applicable for tag browsing
     }));
 
   } catch (error) {
-    console.error('Error in getKnowledgeVectorsByCategory:', error);
+    console.error('Error in getKnowledgeVectorsByTags:', error);
     return [];
   }
 } 

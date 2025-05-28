@@ -5,7 +5,6 @@ export interface KnowledgeVector {
   id: string;
   account_id: string;
   content: string;
-  category: string;
   tags: string[];
   added_by: string;
   embedding: number[];

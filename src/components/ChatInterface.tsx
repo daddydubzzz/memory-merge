@@ -105,14 +105,13 @@ export default function ChatInterface({ accountId }: ChatInterfaceProps) {
         // Store new information
         await knowledgeService.addKnowledge({
           content: processedQuery.content,
-          category: processedQuery.category,
-          tags: processedQuery.searchTerms,
+          tags: processedQuery.tags,
           addedBy: user.uid,
         });
 
         const botMessage: Message = {
           id: (Date.now() + 1).toString(),
-          content: `Perfect! I've saved "${processedQuery.content}" in ${processedQuery.category}. You'll be able to find it easily whenever you need it.`,
+          content: `Perfect! I've saved "${processedQuery.content}" with tags: ${processedQuery.tags.map((tag: string) => `#${tag}`).join(', ')}. You'll be able to find it easily whenever you need it.`,
           isUser: false,
           timestamp: new Date(),
           suggestions: [
@@ -124,10 +123,10 @@ export default function ChatInterface({ accountId }: ChatInterfaceProps) {
 
         setMessages(prev => [...prev, botMessage]);
       } else {
-        // Search for existing information
+        // Search for existing information using tags if available
         const searchResults = await knowledgeService.searchKnowledge(
           processedQuery.searchTerms,
-          processedQuery.category !== 'Other' ? [processedQuery.category] : undefined
+          processedQuery.tags.length > 0 ? processedQuery.tags : undefined
         );
 
         // Generate response using OpenAI via API
@@ -209,7 +208,12 @@ export default function ChatInterface({ accountId }: ChatInterfaceProps) {
                   <p className="text-xs font-medium">Sources:</p>
                   {message.sources.map((source, index) => (
                     <div key={source.id || index} className="text-xs mt-1 opacity-75">
-                      <span className="font-medium">{source.category}:</span> {source.content.substring(0, 100)}...
+                      <div className="flex flex-wrap gap-1 mb-1">
+                        {source.tags.map((tag: string) => (
+                          <span key={tag} className="text-blue-600 font-medium">#{tag}</span>
+                        ))}
+                      </div>
+                      <span>{source.content.substring(0, 100)}...</span>
                     </div>
                   ))}
                 </div>

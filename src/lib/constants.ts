@@ -1,5 +1,35 @@
-// Knowledge categories for organizing information
-export const KNOWLEDGE_CATEGORIES = [
+// Common tag suggestions for consistency (users can add custom tags too)
+export const SUGGESTED_TAGS = [
+  // Home & Maintenance
+  'home', 'maintenance', 'repair', 'appliances', 'utilities', 'wifi', 'router',
+  
+  // Health & Medical  
+  'health', 'medical', 'doctor', 'appointment', 'insurance', 'medication', 'pharmacy',
+  
+  // Finance & Documents
+  'finance', 'banking', 'insurance', 'taxes', 'documents', 'passwords', 'accounts',
+  
+  // Daily Life
+  'shopping', 'groceries', 'restaurant', 'takeout', 'recipes', 'cooking',
+  
+  // Transportation
+  'car', 'maintenance', 'insurance', 'registration', 'parking', 'gas', 'repair',
+  
+  // Personal & Family
+  'birthday', 'anniversary', 'family', 'friends', 'contacts', 'emergency',
+  
+  // Work & Tasks
+  'work', 'reminder', 'deadline', 'appointment', 'meeting', 'task',
+  
+  // Travel & Events  
+  'travel', 'vacation', 'hotel', 'flight', 'event', 'tickets', 'reservation',
+  
+  // Storage & Organization
+  'storage', 'location', 'attic', 'basement', 'garage', 'closet', 'holiday'
+] as const;
+
+// Legacy categories (for migration purposes)
+export const LEGACY_CATEGORIES = [
   'Tasks & Reminders',
   'Home Maintenance', 
   'Documents',
@@ -15,16 +45,32 @@ export const KNOWLEDGE_CATEGORIES = [
   'Other'
 ] as const;
 
-export type KnowledgeCategory = typeof KNOWLEDGE_CATEGORIES[number];
+// Category to tags mapping for migration
+export const CATEGORY_TO_TAGS_MAP: Record<string, string[]> = {
+  'Tasks & Reminders': ['task', 'reminder'],
+  'Home Maintenance': ['home', 'maintenance'],
+  'Documents': ['documents'],
+  'Schedules & Events': ['schedule', 'event'],
+  'Shopping': ['shopping'],
+  'Travel': ['travel'],
+  'Personal Notes': ['personal', 'notes'],
+  'Household Items': ['household', 'items'],
+  'Finance': ['finance'],
+  'Health & Medical': ['health', 'medical'],
+  'Contacts': ['contacts'],
+  'Passwords & Accounts': ['passwords', 'accounts'],
+  'Other': ['misc']
+};
 
-// Knowledge entry interface
+export type LegacyKnowledgeCategory = typeof LEGACY_CATEGORIES[number];
+
+// Updated knowledge entry interface (tags-based)
 export interface KnowledgeEntry {
   id?: string;
   content: string;
-  category: string;
-  tags: string[];
+  tags: string[]; // Primary organization method
   addedBy: string;
   createdAt: Date;
   updatedAt: Date;
-  accountId: string; // Changed from coupleId to be more inclusive
+  accountId: string;
 } 

@@ -1,10 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { searchKnowledgeVector, hybridSearch, getRecentKnowledgeVectors, getKnowledgeVectorsByCategory } from '@/lib/vector-search';
+import { searchKnowledgeVector, hybridSearch, getRecentKnowledgeVectors, getKnowledgeVectorsByTags } from '@/lib/vector-search';
 
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
-    const { action, accountId, query, categories, options } = body;
+    const { action, accountId, query, tags, options } = body;
 
     switch (action) {
       case 'search': {
@@ -15,18 +15,13 @@ export async function POST(request: NextRequest) {
           );
         }
 
-        // Use hybrid search for better results
-        const results = await hybridSearch(accountId, query, options);
-        
-        // Filter by categories if specified
-        let filteredResults = results;
-        if (categories && categories.length > 0) {
-          filteredResults = results.filter(result => 
-            categories.includes(result.category)
-          );
-        }
+        // Use hybrid search with tag filtering
+        const results = await hybridSearch(accountId, query, {
+          ...options,
+          tags // Pass tag filtering
+        });
 
-        return NextResponse.json({ success: true, results: filteredResults });
+        return NextResponse.json({ success: true, results });
       }
 
       case 'recent': {
@@ -42,21 +37,26 @@ export async function POST(request: NextRequest) {
         return NextResponse.json({ success: true, results });
       }
 
-      case 'category': {
-        if (!accountId || !query) {
+      case 'tags': {
+        if (!accountId || !tags || !Array.isArray(tags)) {
           return NextResponse.json(
-            { error: 'Missing required fields: accountId and category (in query field)' },
+            { error: 'Missing required fields: accountId and tags array' },
             { status: 400 }
           );
         }
 
-        const results = await getKnowledgeVectorsByCategory(accountId, query);
+        // Get all entries matching any of the provided tags
+        const results = await hybridSearch(accountId, '', {
+          matchThreshold: 0,
+          matchCount: 100,
+          tags
+        });
         return NextResponse.json({ success: true, results });
       }
 
       default:
         return NextResponse.json(
-          { error: 'Invalid action. Use: search, recent, or category' },
+          { error: 'Invalid action. Use: search, recent, or tags' },
           { status: 400 }
         );
     }
