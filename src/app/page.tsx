@@ -2,38 +2,38 @@
 
 import React, { useState, useEffect } from 'react';
 import { AuthProvider, useAuth } from '@/contexts/AuthContext';
-import { getCoupleByMember } from '@/lib/knowledge';
+import { getAccountByMember } from '@/lib/knowledge';
 import AuthForm from '@/components/AuthForm';
 import Dashboard from '@/components/Dashboard';
 
 function AppContent() {
   const { user, loading } = useAuth();
-  const [coupleId, setCoupleId] = useState<string | null>(null);
-  const [coupleLoading, setCoupleLoading] = useState(true);
+  const [accountId, setAccountId] = useState<string | null>(null);
+  const [accountLoading, setAccountLoading] = useState(true);
 
-  // Check if user has a couple when they sign in
+  // Check if user has an account when they sign in
   useEffect(() => {
-    const checkCouple = async () => {
+    const checkAccount = async () => {
       if (user) {
-        setCoupleLoading(true);
+        setAccountLoading(true);
         try {
-          const couple = await getCoupleByMember(user.uid);
-          setCoupleId(couple?.id || null);
+          const account = await getAccountByMember(user.uid);
+          setAccountId(account?.id || null);
         } catch (error) {
-          console.error('Error checking couple:', error);
+          console.error('Error checking account:', error);
         }
-        setCoupleLoading(false);
+        setAccountLoading(false);
       } else {
-        setCoupleId(null);
-        setCoupleLoading(false);
+        setAccountId(null);
+        setAccountLoading(false);
       }
     };
 
-    checkCouple();
+    checkAccount();
   }, [user]);
 
-  // Show loading spinner while checking auth or couple status
-  if (loading || coupleLoading) {
+  // Show loading spinner while checking auth or account status
+  if (loading || accountLoading) {
     return (
       <div className="min-h-screen bg-gray-100 flex items-center justify-center">
         <div className="text-center">
@@ -52,8 +52,8 @@ function AppContent() {
   // Show dashboard if user is signed in
   return (
     <Dashboard 
-      coupleId={coupleId} 
-      onCoupleSetup={(newCoupleId) => setCoupleId(newCoupleId)} 
+      accountId={accountId} 
+      onAccountSetup={(newAccountId) => setAccountId(newAccountId)} 
     />
   );
 }

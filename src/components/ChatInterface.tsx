@@ -16,21 +16,21 @@ interface Message {
 }
 
 interface ChatInterfaceProps {
-  coupleId: string;
+  accountId: string;
 }
 
-export default function ChatInterface({ coupleId }: ChatInterfaceProps) {
+export default function ChatInterface({ accountId }: ChatInterfaceProps) {
   const { user } = useAuth();
   const [messages, setMessages] = useState<Message[]>([
     {
       id: '1',
-      content: "Hi! I'm here to help you and your partner organize and find your shared information. You can ask me questions like 'Where did we put the Christmas decorations?' or tell me something new like 'We just bought a new dishwasher warranty that expires in 2027'.",
+      content: "Hi! I'm here to help you organize and find your household information. You can ask me questions like 'Where did we put the Christmas decorations?' or tell me something new like 'We just bought a new dishwasher warranty that expires in 2027'.",
       isUser: false,
       timestamp: new Date(),
       suggestions: [
-        "Tell me about our home warranties",
-        "What restaurants do we like?",
-        "Where are our important documents?"
+        "Tell me about home warranties",
+        "What restaurants do I like?",
+        "Where are important documents?"
       ]
     }
   ]);
@@ -40,7 +40,7 @@ export default function ChatInterface({ coupleId }: ChatInterfaceProps) {
   const [recognition, setRecognition] = useState<SpeechRecognition | null>(null);
   
   const messagesEndRef = useRef<HTMLDivElement>(null);
-  const knowledgeService = new KnowledgeService(coupleId);
+  const knowledgeService = new KnowledgeService(accountId);
 
   // Initialize speech recognition
   useEffect(() => {
@@ -112,13 +112,13 @@ export default function ChatInterface({ coupleId }: ChatInterfaceProps) {
 
         const botMessage: Message = {
           id: (Date.now() + 1).toString(),
-          content: `Got it! I've saved that information in ${processedQuery.category}. Your partner will be able to find it easily when they need it.`,
+          content: `Perfect! I've saved "${processedQuery.content}" in ${processedQuery.category}. You'll be able to find it easily whenever you need it.`,
           isUser: false,
           timestamp: new Date(),
           suggestions: [
             "What else can I help you store?",
             "Show me recent entries",
-            "Tell me about our stored information"
+            "Tell me about my stored information"
           ]
         };
 

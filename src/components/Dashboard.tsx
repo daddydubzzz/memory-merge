@@ -13,23 +13,23 @@ import {
   Heart
 } from 'lucide-react';
 import { useAuth } from '@/contexts/AuthContext';
-import { getCoupleByMember, createCouple, KnowledgeService } from '@/lib/knowledge';
+import { getAccountByMember, createAccount, KnowledgeService } from '@/lib/knowledge';
 import { KNOWLEDGE_CATEGORIES } from '@/lib/constants';
 import ChatInterface from './ChatInterface';
 
 interface DashboardProps {
-  coupleId: string | null;
-  onCoupleSetup: (coupleId: string) => void;
+  accountId: string | null;
+  onAccountSetup: (accountId: string) => void;
 }
 
-export default function Dashboard({ coupleId, onCoupleSetup }: DashboardProps) {
+export default function Dashboard({ accountId, onAccountSetup }: DashboardProps) {
   const { user, signout } = useAuth();
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [activeView, setActiveView] = useState('chat');
   const [recentEntries, setRecentEntries] = useState<any[]>([]);
   const [categoryStats, setCategoryStats] = useState<Record<string, number>>({});
   
-  const knowledgeService = coupleId ? new KnowledgeService(coupleId) : null;
+  const knowledgeService = accountId ? new KnowledgeService(accountId) : null;
 
   // Load recent entries and stats
   useEffect(() => {
@@ -47,7 +47,7 @@ export default function Dashboard({ coupleId, onCoupleSetup }: DashboardProps) {
       };
       loadData();
     }
-  }, [coupleId]);
+  }, [accountId]);
 
   const handleSignOut = async () => {
     try {
@@ -57,9 +57,9 @@ export default function Dashboard({ coupleId, onCoupleSetup }: DashboardProps) {
     }
   };
 
-  // If no couple, show setup screen
-  if (!coupleId) {
-    return <CoupleSetup onCoupleCreated={onCoupleSetup} />;
+  // If no account, show setup screen
+  if (!accountId) {
+    return <AccountSetup onAccountCreated={onAccountSetup} />;
   }
 
   const sidebarContent = (
@@ -189,8 +189,8 @@ export default function Dashboard({ coupleId, onCoupleSetup }: DashboardProps) {
 
         {/* Content area */}
         <div className="flex-1">
-          {activeView === 'chat' && <ChatInterface coupleId={coupleId} />}
-          {activeView === 'browse' && <BrowseView coupleId={coupleId} />}
+          {activeView === 'chat' && <ChatInterface accountId={accountId} />}
+          {activeView === 'browse' && <BrowseView accountId={accountId} />}
           {activeView === 'settings' && <SettingsView />}
         </div>
       </div>
@@ -198,21 +198,21 @@ export default function Dashboard({ coupleId, onCoupleSetup }: DashboardProps) {
   );
 }
 
-// Couple setup component
-function CoupleSetup({ onCoupleCreated }: { onCoupleCreated: (coupleId: string) => void }) {
+// Account setup component
+function AccountSetup({ onAccountCreated }: { onAccountCreated: (accountId: string) => void }) {
   const { user } = useAuth();
   const [loading, setLoading] = useState(false);
   const [inviteCode, setInviteCode] = useState('');
 
-  const handleCreateCouple = async () => {
+  const handleCreateAccount = async () => {
     if (!user) return;
     
     setLoading(true);
     try {
-      const coupleId = await createCouple([user.uid]);
-      onCoupleCreated(coupleId);
+      const accountId = await createAccount([user.uid]);
+      onAccountCreated(accountId);
     } catch (error) {
-      console.error('Error creating couple:', error);
+      console.error('Error creating account:', error);
     }
     setLoading(false);
   };
@@ -224,13 +224,13 @@ function CoupleSetup({ onCoupleCreated }: { onCoupleCreated: (coupleId: string) 
           <Heart className="w-12 h-12 text-pink-500 mx-auto mb-4" />
           <h1 className="text-2xl font-bold text-gray-900 mb-2">Create Your Shared Account</h1>
           <p className="text-gray-600">
-            Set up a shared knowledge space that you and your partner can both access and contribute to
+            Set up a shared knowledge space that you and your family, partner, or household members can all access and contribute to
           </p>
         </div>
 
         <div className="space-y-4">
           <button
-            onClick={handleCreateCouple}
+            onClick={handleCreateAccount}
             disabled={loading}
             className="w-full bg-blue-500 text-white py-3 px-4 rounded-lg hover:bg-blue-600 disabled:opacity-50 transition-colors flex items-center justify-center"
           >
@@ -252,7 +252,7 @@ function CoupleSetup({ onCoupleCreated }: { onCoupleCreated: (coupleId: string) 
               type="text"
               value={inviteCode}
               onChange={(e) => setInviteCode(e.target.value)}
-              placeholder="Enter invite code from your partner"
+              placeholder="Enter invite code from another member"
               className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
             />
             <button
@@ -260,7 +260,7 @@ function CoupleSetup({ onCoupleCreated }: { onCoupleCreated: (coupleId: string) 
               className="w-full mt-2 bg-gray-500 text-white py-2 px-4 rounded-lg hover:bg-gray-600 disabled:opacity-50 transition-colors flex items-center justify-center"
             >
               <Users className="w-5 h-5 mr-2" />
-              Join Partner's Account
+              Join Existing Account
             </button>
           </div>
         </div>
@@ -270,7 +270,7 @@ function CoupleSetup({ onCoupleCreated }: { onCoupleCreated: (coupleId: string) 
 }
 
 // Browse view component
-function BrowseView({ coupleId }: { coupleId: string }) {
+function BrowseView({ accountId }: { accountId: string }) {
   return (
     <div className="p-6">
       <h2 className="text-2xl font-bold text-gray-900 mb-6">Browse Knowledge</h2>

@@ -1,22 +1,23 @@
 # Memory Merge
 
-**An intelligent, shared knowledge repository for couples**
+**An intelligent, shared knowledge repository for households**
 
-Memory Merge is a Progressive Web App that allows couples to store, organize, and retrieve household information through natural language interactions. Built with Next.js, Firebase, and OpenAI, it eliminates the mental load imbalance common in relationships by creating a centralized, AI-powered system both partners can easily access and contribute to.
+Memory Merge is a Progressive Web App that allows household members (couples, families, roommates, etc.) to store, organize, and retrieve shared information through natural language interactions. Built with Next.js, Firebase, and OpenAI, it creates a centralized, AI-powered system that multiple people can easily access and contribute to, while providing each user with a personalized experience.
 
 ## Features
 
 - 🤖 **Natural Language Processing**: Ask questions and store information conversationally
 - 🎤 **Voice Input**: Speak to add information hands-free
 - 📱 **Progressive Web App**: Install like a native app on any device
-- ⚡ **Real-time Sync**: Instantly share information between partners
-- 🏷️ **Smart Categorization**: AI automatically organizes your information
+- ⚡ **Real-time Sync**: Instantly share information between household members
+- 🏷️ **Smart Categorization**: AI automatically organizes your information into 13+ categories
 - 🔍 **Intelligent Search**: Find information with fuzzy matching and context understanding
+- 👤 **Personalized Experience**: Each user gets their own tailored interaction experience
 - 🔐 **Secure & Private**: End-to-end encryption with Firebase security
 
 ## Tech Stack
 
-- **Frontend**: Next.js 14, React, TypeScript, Tailwind CSS
+- **Frontend**: Next.js 15, React 19, TypeScript, Tailwind CSS
 - **Backend**: Firebase (Firestore, Auth, Storage)
 - **AI**: OpenAI GPT-4o-mini
 - **PWA**: next-pwa for offline capability and app installation
@@ -50,13 +51,10 @@ NEXT_PUBLIC_FIREBASE_PROJECT_ID=your_project_id
 NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET=your_project_id.appspot.com
 NEXT_PUBLIC_FIREBASE_MESSAGING_SENDER_ID=your_sender_id
 NEXT_PUBLIC_FIREBASE_APP_ID=your_app_id
+NEXT_PUBLIC_FIREBASE_MEASUREMENT_ID=your_measurement_id
 
 # OpenAI Configuration
 OPENAI_API_KEY=your_openai_api_key
-
-# Next.js Configuration
-NEXTAUTH_SECRET=your_nextauth_secret
-NEXTAUTH_URL=http://localhost:3000
 ```
 
 ### 3. Firebase Setup
@@ -75,17 +73,28 @@ service cloud.firestore {
       allow read, write: if request.auth != null && request.auth.uid == userId;
     }
     
-    // Couples can be read/written by their members
-    match /couples/{coupleId} {
+    // Accounts can be created by any authenticated user and read/written by their members
+    match /accounts/{accountId} {
+      // Allow create for any authenticated user (when they're adding themselves to members)
+      allow create: if request.auth != null && 
+        request.auth.uid in request.resource.data.members;
+      
+      // Allow read/write for existing members
       allow read, write: if request.auth != null && 
         request.auth.uid in resource.data.members;
     }
     
-    // Knowledge entries can be accessed by couple members
+    // Knowledge entries can be accessed by account members
     match /knowledge/{entryId} {
+      // Allow create when user is member of the account they're adding to
+      allow create: if request.auth != null && 
+        exists(/databases/$(database)/documents/accounts/$(request.resource.data.accountId)) &&
+        request.auth.uid in get(/databases/$(database)/documents/accounts/$(request.resource.data.accountId)).data.members;
+      
+      // Allow read/write for existing entries when user is member of the account
       allow read, write: if request.auth != null && 
-        exists(/databases/$(database)/documents/couples/$(resource.data.coupleId)) &&
-        request.auth.uid in get(/databases/$(database)/documents/couples/$(resource.data.coupleId)).data.members;
+        exists(/databases/$(database)/documents/accounts/$(resource.data.accountId)) &&
+        request.auth.uid in get(/databases/$(database)/documents/accounts/$(resource.data.accountId)).data.members;
     }
   }
 }
@@ -104,6 +113,37 @@ npm run dev
 ```
 
 Open [http://localhost:3000](http://localhost:3000) to see the app.
+
+## OpenAI Integration Details
+
+The app uses OpenAI GPT-4o-mini in two main ways:
+
+### 1. Intent Classification & Categorization
+When users input information, the AI determines:
+- **Intent**: Whether the user wants to store new information or retrieve existing information
+- **Category**: Automatically categorizes into one of 13 predefined categories:
+  - Tasks & Reminders
+  - Home Maintenance
+  - Documents
+  - Schedules & Events
+  - Shopping
+  - Travel
+  - Personal Notes
+  - Household Items
+  - Finance
+  - Health & Medical
+  - Contacts
+  - Passwords & Accounts
+  - Other
+
+### 2. Response Generation
+For queries, the AI:
+- Searches the knowledge base for relevant entries
+- Generates conversational responses based on found information
+- Provides helpful suggestions for follow-up actions
+- Maintains a personalized, friendly tone for each user
+
+The prompts are designed to be inclusive of different household types (not just couples) and provide each user with a personalized experience.
 
 ## Deployment
 
@@ -127,15 +167,16 @@ The app can be deployed to any platform that supports Next.js:
 ### For New Users
 
 1. **Sign Up**: Create an account with email or Google
-2. **Setup Couple**: Create a new shared memory space
-3. **Invite Partner**: Share the invite code with your partner
+2. **Create Account**: Set up a new shared household account
+3. **Invite Members**: Share the invite code with other household members
 4. **Start Adding Information**: Use natural language to store information
 
 ### Storing Information
 
 Use natural language to add information:
+- "Remind me to get golf balls tomorrow before the big match"
+- "I need to remember to send back the Stitch Fix items that I don't want to keep"
 - "We got a new dishwasher warranty that expires in 2027"
-- "Our favorite Thai restaurant is called Bangkok Garden on Main Street"
 - "The WiFi password is MySecurePassword123"
 
 ### Finding Information
@@ -144,6 +185,7 @@ Ask questions naturally:
 - "Where did we put the Christmas decorations?"
 - "What's our WiFi password?"
 - "When does the car registration expire?"
+- "Show me my recent entries"
 
 ## Project Structure
 
@@ -162,12 +204,12 @@ memory-merge/
 │   ├── lib/
 │   │   ├── firebase.ts               # Firebase configuration
 │   │   ├── knowledge.ts              # Firestore operations
-│   │   └── openai.ts                 # OpenAI integration
+│   │   ├── openai.ts                 # OpenAI integration
+│   │   └── constants.ts              # Categories and types
 │   └── types/
 │       └── speech.d.ts               # Speech API types
 ├── public/
 │   └── manifest.json                 # PWA manifest
-├── .env.example                      # Environment template
 └── next.config.ts                    # Next.js + PWA config
 ```
 
@@ -181,12 +223,12 @@ memory-merge/
   email: string;
   displayName: string;
   photoURL?: string;
-  coupleId?: string;
+  accountId?: string;
   createdAt: Timestamp;
 }
 ```
 
-**couples**: Couple relationships
+**accounts**: Household/family accounts
 ```typescript
 {
   members: string[];           // Array of user IDs
@@ -205,7 +247,7 @@ memory-merge/
   category: string;           // AI-categorized type
   tags: string[];            // Searchable tags
   addedBy: string;           // User ID who added it
-  coupleId: string;          // Associated couple
+  accountId: string;         // Associated account
   createdAt: Timestamp;
   updatedAt: Timestamp;
 }
@@ -222,9 +264,10 @@ memory-merge/
 ## Security & Privacy
 
 - All data is encrypted in transit and at rest
-- Firebase security rules ensure couple-only access
+- Firebase security rules ensure account member-only access
 - OpenAI processes data but doesn't store it
 - No third-party analytics or tracking
+- Each user gets their own personalized experience while sharing the same knowledge base
 
 ## License
 
@@ -236,4 +279,4 @@ For support, email support@memorymerge.app or open an issue on GitHub.
 
 ---
 
-**Built with ❤️ for couples who want to share the mental load**
+**Built with ❤️ for households who want to share information seamlessly**

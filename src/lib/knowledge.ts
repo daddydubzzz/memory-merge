@@ -16,7 +16,7 @@ import {
 import { db } from './firebase';
 import type { KnowledgeEntry } from './constants';
 
-export interface Couple {
+export interface Account {
   id?: string;
   members: string[];
   createdAt: Date;
@@ -27,18 +27,18 @@ export interface Couple {
 }
 
 export class KnowledgeService {
-  private coupleId: string;
+  private accountId: string;
 
-  constructor(coupleId: string) {
-    this.coupleId = coupleId;
+  constructor(accountId: string) {
+    this.accountId = accountId;
   }
 
   // Store new knowledge entry
-  async addKnowledge(entry: Omit<KnowledgeEntry, 'id' | 'createdAt' | 'updatedAt' | 'coupleId'>): Promise<string> {
+  async addKnowledge(entry: Omit<KnowledgeEntry, 'id' | 'createdAt' | 'updatedAt' | 'accountId'>): Promise<string> {
     try {
       const docRef = await addDoc(collection(db, 'knowledge'), {
         ...entry,
-        coupleId: this.coupleId,
+        accountId: this.accountId,
         createdAt: serverTimestamp(),
         updatedAt: serverTimestamp(),
       });
@@ -55,7 +55,7 @@ export class KnowledgeService {
       const knowledgeRef = collection(db, 'knowledge');
       let q = query(
         knowledgeRef,
-        where('coupleId', '==', this.coupleId),
+        where('accountId', '==', this.accountId),
         orderBy('createdAt', 'desc'),
         limit(20)
       );
@@ -63,7 +63,7 @@ export class KnowledgeService {
       if (categories && categories.length > 0) {
         q = query(
           knowledgeRef,
-          where('coupleId', '==', this.coupleId),
+          where('accountId', '==', this.accountId),
           where('category', 'in', categories),
           orderBy('createdAt', 'desc'),
           limit(20)
@@ -102,7 +102,7 @@ export class KnowledgeService {
       const knowledgeRef = collection(db, 'knowledge');
       const q = query(
         knowledgeRef,
-        where('coupleId', '==', this.coupleId),
+        where('accountId', '==', this.accountId),
         orderBy('createdAt', 'desc'),
         limit(limitCount)
       );
@@ -126,7 +126,7 @@ export class KnowledgeService {
       const knowledgeRef = collection(db, 'knowledge');
       const q = query(
         knowledgeRef,
-        where('coupleId', '==', this.coupleId),
+        where('accountId', '==', this.accountId),
         where('category', '==', category),
         orderBy('createdAt', 'desc')
       );
@@ -145,7 +145,7 @@ export class KnowledgeService {
   }
 
   // Update knowledge entry
-  async updateKnowledge(id: string, updates: Partial<Omit<KnowledgeEntry, 'id' | 'createdAt' | 'coupleId'>>): Promise<void> {
+  async updateKnowledge(id: string, updates: Partial<Omit<KnowledgeEntry, 'id' | 'createdAt' | 'accountId'>>): Promise<void> {
     try {
       const docRef = doc(db, 'knowledge', id);
       await updateDoc(docRef, {
@@ -173,7 +173,7 @@ export class KnowledgeService {
     const knowledgeRef = collection(db, 'knowledge');
     const q = query(
       knowledgeRef,
-      where('coupleId', '==', this.coupleId),
+      where('accountId', '==', this.accountId),
       orderBy('createdAt', 'desc'),
       limit(50)
     );
@@ -190,10 +190,10 @@ export class KnowledgeService {
   }
 }
 
-// Couple management functions
-export async function createCouple(memberIds: string[]): Promise<string> {
+// Account management functions
+export async function createAccount(memberIds: string[]): Promise<string> {
   try {
-    const docRef = await addDoc(collection(db, 'couples'), {
+    const docRef = await addDoc(collection(db, 'accounts'), {
       members: memberIds,
       createdAt: serverTimestamp(),
       settings: {
@@ -203,15 +203,15 @@ export async function createCouple(memberIds: string[]): Promise<string> {
     });
     return docRef.id;
   } catch (error) {
-    console.error('Error creating couple:', error);
+    console.error('Error creating account:', error);
     throw error;
   }
 }
 
-export async function getCoupleByMember(userId: string): Promise<Couple | null> {
+export async function getAccountByMember(userId: string): Promise<Account | null> {
   try {
-    const couplesRef = collection(db, 'couples');
-    const q = query(couplesRef, where('members', 'array-contains', userId));
+    const accountsRef = collection(db, 'accounts');
+    const q = query(accountsRef, where('members', 'array-contains', userId));
     const snapshot = await getDocs(q);
     
     if (snapshot.empty) {
@@ -223,30 +223,30 @@ export async function getCoupleByMember(userId: string): Promise<Couple | null> 
       id: doc.id,
       ...doc.data(),
       createdAt: doc.data().createdAt?.toDate() || new Date(),
-    } as Couple;
+    } as Account;
   } catch (error) {
-    console.error('Error getting couple:', error);
+    console.error('Error getting account:', error);
     return null;
   }
 }
 
-export async function joinCouple(coupleId: string, userId: string): Promise<void> {
+export async function joinAccount(accountId: string, userId: string): Promise<void> {
   try {
-    const coupleRef = doc(db, 'couples', coupleId);
-    // Note: In a real app, you'd want to check if the couple exists and if the user is authorized
-    await updateDoc(coupleRef, {
+    const accountRef = doc(db, 'accounts', accountId);
+    // Note: In a real app, you'd want to check if the account exists and if the user is authorized
+    await updateDoc(accountRef, {
       members: [userId], // This would need to be an array union in a real implementation
     });
   } catch (error) {
-    console.error('Error joining couple:', error);
+    console.error('Error joining account:', error);
     throw error;
   }
 }
 
 // Utility function to get category statistics
-export async function getCategoryStats(coupleId: string): Promise<Record<string, number>> {
+export async function getCategoryStats(accountId: string): Promise<Record<string, number>> {
   try {
-    const knowledgeService = new KnowledgeService(coupleId);
+    const knowledgeService = new KnowledgeService(accountId);
     const entries = await knowledgeService.getRecentKnowledge(1000); // Get all entries
     
     const stats: Record<string, number> = {};

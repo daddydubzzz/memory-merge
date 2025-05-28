@@ -1,14 +1,17 @@
 // Knowledge categories for organizing information
 export const KNOWLEDGE_CATEGORIES = [
-  'Home Maintenance',
-  'Documents', 
-  'Schedules',
+  'Tasks & Reminders',
+  'Home Maintenance', 
+  'Documents',
+  'Schedules & Events',
   'Shopping',
   'Travel',
-  'Personal',
-  'Household',
+  'Personal Notes',
+  'Household Items',
   'Finance',
-  'Health',
+  'Health & Medical',
+  'Contacts',
+  'Passwords & Accounts',
   'Other'
 ] as const;
 
@@ -23,5 +26,5 @@ export interface KnowledgeEntry {
   addedBy: string;
   createdAt: Date;
   updatedAt: Date;
-  coupleId: string;
+  accountId: string; // Changed from coupleId to be more inclusive
 } 

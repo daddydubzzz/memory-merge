@@ -1,4 +1,5 @@
 import OpenAI from 'openai';
+import { z } from 'zod';
 import type { KnowledgeEntry } from './constants';
 
 // Create OpenAI client - this should only be used server-side
@@ -10,6 +11,21 @@ function createOpenAIClient() {
 
 // Export interfaces from constants
 export type { KnowledgeEntry } from './constants';
+
+// Zod schemas for validation
+const ProcessedQuerySchema = z.object({
+  intent: z.enum(['store', 'retrieve', 'unclear']),
+  category: z.string(),
+  content: z.string(),
+  searchTerms: z.array(z.string()),
+  confidence: z.number().min(0).max(1)
+});
+
+const QueryResponseSchema = z.object({
+  answer: z.string(),
+  confidence: z.number().min(0).max(1),
+  suggestions: z.array(z.string())
+});
 
 export interface ProcessedQuery {
   intent: 'store' | 'retrieve' | 'unclear';
@@ -26,53 +42,116 @@ export interface QueryResponse {
   suggestions: string[];
 }
 
+// Function definition for categorization
+const categorizationFunction = {
+  name: "process_user_input",
+  description: "Analyze user input to determine intent and categorize information for a household knowledge management system",
+  parameters: {
+    type: "object",
+    properties: {
+      intent: {
+        type: "string",
+        enum: ["store", "retrieve", "unclear"],
+        description: "Whether the user wants to store new information, retrieve existing information, or intent is unclear"
+      },
+      category: {
+        type: "string",
+        description: "The category that best fits this information",
+        enum: [
+          "Tasks & Reminders",
+          "Home Maintenance", 
+          "Documents",
+          "Schedules & Events",
+          "Shopping",
+          "Travel",
+          "Personal Notes",
+          "Household Items",
+          "Finance",
+          "Health & Medical",
+          "Contacts",
+          "Passwords & Accounts",
+          "Other"
+        ]
+      },
+      content: {
+        type: "string",
+        description: "For storage: clean, processed content to store. For retrieval: the original query"
+      },
+      searchTerms: {
+        type: "array",
+        items: { type: "string" },
+        description: "Key terms that would help search for this information"
+      },
+      confidence: {
+        type: "number",
+        minimum: 0,
+        maximum: 1,
+        description: "Confidence level in the categorization"
+      }
+    },
+    required: ["intent", "category", "content", "searchTerms", "confidence"]
+  }
+};
+
+// Function definition for response generation
+const responseFunction = {
+  name: "generate_response",
+  description: "Generate a helpful, conversational response based on user query and available information",
+  parameters: {
+    type: "object",
+    properties: {
+      answer: {
+        type: "string",
+        description: "A helpful, conversational response to the user's query"
+      },
+      confidence: {
+        type: "number",
+        minimum: 0,
+        maximum: 1,
+        description: "Confidence level in the response"
+      },
+      suggestions: {
+        type: "array",
+        items: { type: "string" },
+        description: "2-3 helpful follow-up suggestions for the user"
+      }
+    },
+    required: ["answer", "confidence", "suggestions"]
+  }
+};
+
 // System prompt for categorizing and processing knowledge entries
-const CATEGORIZATION_PROMPT = `You are an AI assistant that helps couples organize and categorize their shared household information. 
+const CATEGORIZATION_PROMPT = `You are an AI assistant that helps people organize and categorize their shared household and personal information. 
 
 Analyze the user's input and determine:
 1. Intent: Is this storing new information ('store') or retrieving existing information ('retrieve')?
-2. Category: What category does this belong to? Choose from:
-   - Home Maintenance (repairs, warranties, service contacts)
-   - Documents (important papers, IDs, insurance)
-   - Schedules (appointments, events, deadlines)
-   - Shopping (lists, preferences, stores)
-   - Travel (reservations, itineraries, preferences)
-   - Personal (gift ideas, preferences, special dates)
-   - Household (locations of items, organization)
-   - Finance (accounts, passwords, important numbers)
-   - Health (doctors, medications, insurance)
-   - Other
+2. Category: What category does this belong to? Choose the most appropriate one.
+3. For storage: Extract the key information to store cleanly
+4. For retrieval: Use the original query as content and generate search terms
 
-3. For storage: Extract the key information to store
-4. For retrieval: Generate search terms that would help find relevant information
+Examples:
+- "Remind me to get golf balls tomorrow" → store, Tasks & Reminders
+- "I need to send back Stitch Fix items" → store, Tasks & Reminders  
+- "Where did we put the Christmas decorations?" → retrieve, Household Items
+- "What's our WiFi password?" → retrieve, Passwords & Accounts
 
-Respond in JSON format only:
-{
-  "intent": "store" | "retrieve" | "unclear",
-  "category": "category name",
-  "content": "processed content for storage OR original query for retrieval",
-  "searchTerms": ["term1", "term2", "term3"],
-  "confidence": 0.0-1.0
-}`;
+Be precise with categorization and generate meaningful search terms.`;
 
 // System prompt for generating responses to queries
-const RESPONSE_PROMPT = `You are a helpful AI assistant for couples managing their shared household knowledge. 
+const RESPONSE_PROMPT = `You are a helpful AI assistant for managing shared household and personal knowledge. 
 
 Given a user's query and relevant knowledge entries, provide a helpful, conversational response. 
 
 Guidelines:
-- Be warm and conversational, like talking to a friend
+- Be warm and conversational, like talking to a helpful friend
 - If information is found, present it clearly and offer to help with related tasks
 - If no exact match, suggest related information or ask clarifying questions
 - Always maintain a helpful, supportive tone
 - Keep responses concise but complete
+- Don't assume specific relationships (could be family, roommates, partners, etc.)
+- Make the experience personal to the current user
 
-Format your response as JSON:
-{
-  "answer": "your conversational response",
-  "confidence": 0.0-1.0,
-  "suggestions": ["suggestion1", "suggestion2", "suggestion3"]
-}`;
+Provide 2-3 helpful follow-up suggestions that make sense in context.`;
 
 export async function processUserInput(input: string): Promise<ProcessedQuery> {
   try {
@@ -83,23 +162,42 @@ export async function processUserInput(input: string): Promise<ProcessedQuery> {
         { role: "system", content: CATEGORIZATION_PROMPT },
         { role: "user", content: input }
       ],
+      tools: [{ type: "function", function: categorizationFunction }],
+      tool_choice: { type: "function", function: { name: "process_user_input" } },
       temperature: 0.3,
       max_tokens: 500,
     });
 
-    const response = completion.choices[0]?.message?.content;
-    if (!response) {
-      throw new Error('No response from OpenAI');
+    const toolCall = completion.choices[0]?.message?.tool_calls?.[0];
+    if (!toolCall || toolCall.function.name !== "process_user_input") {
+      throw new Error('No valid function call returned');
     }
 
-    const parsed = JSON.parse(response) as ProcessedQuery;
-    return parsed;
+    const rawResult = JSON.parse(toolCall.function.arguments);
+    const validatedResult = ProcessedQuerySchema.parse(rawResult);
+    
+    return validatedResult;
   } catch (error) {
     console.error('Error processing user input:', error);
-    // Fallback response
+    
+    // Enhanced fallback with better categorization
+    const lowerInput = input.toLowerCase();
+    let category = 'Other';
+    
+    // Simple keyword-based fallback categorization
+    if (lowerInput.includes('remind') || lowerInput.includes('remember') || lowerInput.includes('need to') || lowerInput.includes('return')) {
+      category = 'Tasks & Reminders';
+    } else if (lowerInput.includes('where') || lowerInput.includes('put') || lowerInput.includes('stored')) {
+      category = 'Household Items';
+    } else if (lowerInput.includes('password') || lowerInput.includes('wifi') || lowerInput.includes('account')) {
+      category = 'Passwords & Accounts';
+    } else if (lowerInput.includes('appointment') || lowerInput.includes('meeting') || lowerInput.includes('schedule')) {
+      category = 'Schedules & Events';
+    }
+    
     return {
       intent: 'unclear',
-      category: 'Other',
+      category,
       content: input,
       searchTerms: input.split(' ').filter(word => word.length > 2),
       confidence: 0.1
@@ -125,40 +223,56 @@ export async function generateResponse(
         { role: "system", content: RESPONSE_PROMPT },
         { role: "user", content: `Query: ${query}\n\n${context}` }
       ],
-      temperature: 0.7,
+      tools: [{ type: "function", function: responseFunction }],
+      tool_choice: { type: "function", function: { name: "generate_response" } },
+      temperature: 0.5, // Reduced from 0.7 for more consistency
       max_tokens: 500,
     });
 
-    const response = completion.choices[0]?.message?.content;
-    if (!response) {
-      throw new Error('No response from OpenAI');
+    const toolCall = completion.choices[0]?.message?.tool_calls?.[0];
+    if (!toolCall || toolCall.function.name !== "generate_response") {
+      throw new Error('No valid function call returned');
     }
 
-    const parsed = JSON.parse(response);
+    const rawResult = JSON.parse(toolCall.function.arguments);
+    const validatedResult = QueryResponseSchema.parse(rawResult);
     
     return {
-      answer: parsed.answer,
-      confidence: parsed.confidence,
+      answer: validatedResult.answer,
+      confidence: validatedResult.confidence,
       sources: relevantEntries,
-      suggestions: parsed.suggestions || []
+      suggestions: validatedResult.suggestions
     };
   } catch (error) {
     console.error('Error generating response:', error);
     
-    // Fallback response
+    // Enhanced fallback response
     if (relevantEntries.length > 0) {
       return {
-        answer: `I found ${relevantEntries.length} related items: ${relevantEntries.map(e => e.content).join(', ')}`,
+        answer: `I found ${relevantEntries.length} related item${relevantEntries.length > 1 ? 's' : ''}: ${relevantEntries.map(e => e.content).slice(0, 2).join(', ')}${relevantEntries.length > 2 ? '...' : ''}`,
         confidence: 0.5,
         sources: relevantEntries,
-        suggestions: []
+        suggestions: ["Tell me more about this", "Show me all related items", "Help me organize this better"]
       };
     } else {
+      // Try to provide helpful suggestions based on the query
+      const suggestions = [];
+      const lowerQuery = query.toLowerCase();
+      
+      if (lowerQuery.includes('where') || lowerQuery.includes('find')) {
+        suggestions.push("Try describing what you're looking for differently");
+        suggestions.push("Tell me more details about the item");
+      } else {
+        suggestions.push("Try being more specific");
+        suggestions.push("Add some context or details");
+      }
+      suggestions.push("Browse your stored information");
+      
       return {
         answer: "I couldn't find any specific information about that. Could you provide more details or try rephrasing your question?",
         confidence: 0.1,
         sources: [],
-        suggestions: ["Try being more specific", "Check if the information was added recently", "Try different keywords"]
+        suggestions: suggestions.slice(0, 3)
       };
     }
   }
