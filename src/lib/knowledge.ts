@@ -34,7 +34,7 @@ export interface Account {
 }
 
 // Helper function to call API routes
-async function callKnowledgeAPI(action: string, data: any) {
+async function callKnowledgeAPI(action: string, data: Record<string, unknown>) {
   const response = await fetch('/api/knowledge', {
     method: 'POST',
     headers: {
@@ -52,7 +52,7 @@ async function callKnowledgeAPI(action: string, data: any) {
 }
 
 // Helper function to call search API routes
-async function callSearchAPI(action: string, data: any) {
+async function callSearchAPI(action: string, data: Record<string, unknown>) {
   const response = await fetch('/api/search', {
     method: 'POST',
     headers: {
@@ -292,27 +292,26 @@ export class KnowledgeService {
           }
         });
 
-        // Convert search results to KnowledgeEntry format
-        const knowledgeEntries: KnowledgeEntry[] = result.results.map((vectorResult: any) => ({
-          id: vectorResult.id,
-          content: vectorResult.content,
-          tags: vectorResult.tags,
-          addedBy: vectorResult.addedBy,
-          createdAt: new Date(vectorResult.createdAt),
-          updatedAt: new Date(vectorResult.updatedAt),
+        const entries: KnowledgeEntry[] = result.results.map((item: Record<string, unknown>) => ({
+          id: item.id as string,
+          content: item.content as string,
+          tags: (item.tags as string[]) || [],
+          addedBy: item.addedBy as string,
+          createdAt: new Date(item.createdAt as string),
+          updatedAt: new Date(item.updatedAt as string),
           accountId: this.accountId,
-          // Map revision fields if they exist
-          timestamp: vectorResult.timestamp,
-          replaces: vectorResult.replaces,
-          replaced_by: vectorResult.replaced_by,
-          intent: vectorResult.intent
+          // Map revision fields if they exist - properly handle potential undefined values
+          timestamp: item.timestamp as string | undefined,
+          replaces: item.replaces as string | undefined,
+          replaced_by: item.replaced_by as string | undefined,
+          intent: item.intent as string | undefined
         }));
 
         // If we have good vector results, cache and return them
-        if (knowledgeEntries.length > 0) {
-          cache.set(cacheKey, knowledgeEntries, 2); // 2 minute cache
-          console.log(`🔍 Vector search found ${knowledgeEntries.length} results`);
-          return this.filterSupersededEntries(knowledgeEntries, includeSuperseded);
+        if (entries.length > 0) {
+          cache.set(cacheKey, entries, 2); // 2 minute cache
+          console.log(`🔍 Vector search found ${entries.length} results`);
+          return this.filterSupersededEntries(entries, includeSuperseded);
         }
       } catch (vectorError) {
         console.warn('Vector search failed, falling back to Firestore:', vectorError);
@@ -422,19 +421,19 @@ export class KnowledgeService {
           options: { limit: limitCount }
         });
 
-        const entries: KnowledgeEntry[] = result.results.map((item: any) => ({
-          id: item.id,
-          content: item.content,
-          tags: item.tags,
-          addedBy: item.addedBy,
-          createdAt: new Date(item.createdAt),
-          updatedAt: new Date(item.updatedAt),
+        const entries: KnowledgeEntry[] = result.results.map((item: Record<string, unknown>) => ({
+          id: item.id as string,
+          content: item.content as string,
+          tags: (item.tags as string[]) || [],
+          addedBy: item.addedBy as string,
+          createdAt: new Date(item.createdAt as string),
+          updatedAt: new Date(item.updatedAt as string),
           accountId: this.accountId,
-          // Map revision fields if they exist
-          timestamp: item.timestamp,
-          replaces: item.replaces,
-          replaced_by: item.replaced_by,
-          intent: item.intent
+          // Map revision fields if they exist - properly handle potential undefined values
+          timestamp: item.timestamp as string | undefined,
+          replaces: item.replaces as string | undefined,
+          replaced_by: item.replaced_by as string | undefined,
+          intent: item.intent as string | undefined
         }));
 
         // Cache for 5 minutes
@@ -825,7 +824,7 @@ export class KnowledgeService {
 
       // Filter out undefined values for Firestore
       const cleanUpdates = Object.fromEntries(
-        Object.entries(updates).filter(([_key, value]) => value !== undefined)
+        Object.entries(updates).filter(([, value]) => value !== undefined)
       );
 
       // Update Firestore
@@ -834,6 +833,9 @@ export class KnowledgeService {
         ...cleanUpdates,
         updatedAt: serverTimestamp(),
       });
+
+      // Invalidate caches since we updated data (especially important for revision system)
+      cache.invalidatePattern(this.accountId);
     } catch (error) {
       console.error('Error updating knowledge:', error);
       throw error;

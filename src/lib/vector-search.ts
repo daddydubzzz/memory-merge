@@ -1,7 +1,6 @@
 import OpenAI from 'openai';
 import { z } from 'zod';
-import { supabase, type KnowledgeVector } from './supabase';
-import type { KnowledgeEntry } from './constants';
+import { supabase } from './supabase';
 
 // Create OpenAI client - this should only be used server-side
 function createOpenAIClient() {
@@ -94,7 +93,15 @@ export async function searchKnowledgeVector(
     }
 
     // Transform results to match our interface
-    return data.map((item: any) => ({
+    return data.map((item: {
+      id: string;
+      content: string;
+      tags: string[];
+      added_by: string;
+      created_at: string;
+      updated_at: string;
+      similarity: number;
+    }) => ({
       id: item.id,
       content: item.content,
       tags: item.tags || [],

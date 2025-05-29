@@ -1,6 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { storeWithEmbedding, updateWithEmbedding, deleteKnowledgeVector } from '@/lib/embedding';
-import type { KnowledgeEntry } from '@/lib/constants';
 
 export async function POST(request: NextRequest) {
   try {

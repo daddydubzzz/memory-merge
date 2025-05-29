@@ -1,6 +1,6 @@
 import OpenAI from 'openai';
 import { z } from 'zod';
-import { supabase, type KnowledgeVector } from './supabase';
+import { supabase } from './supabase';
 import type { KnowledgeEntry } from './constants';
 
 // Create OpenAI client - this should only be used server-side
@@ -100,7 +100,7 @@ export async function updateWithEmbedding(
       embedding = await generateEmbedding(updates.content);
     }
 
-    const updateData: any = { ...updates };
+    const updateData: Record<string, unknown> = { ...updates };
     if (embedding) {
       updateData.embedding = embedding;
     }

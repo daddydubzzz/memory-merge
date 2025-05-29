@@ -1,7 +1,6 @@
 import OpenAI from 'openai';
 import { z } from 'zod';
 import type { KnowledgeEntry } from './constants';
-import { CATEGORY_TO_TAGS_MAP } from './constants';
 
 // Create OpenAI client - this should only be used server-side
 function createOpenAIClient() {

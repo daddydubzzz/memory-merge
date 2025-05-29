@@ -9,12 +9,11 @@ import {
   Archive,
   Plus,
   Menu,
-  X,
   Heart
 } from 'lucide-react';
 import { useAuth } from '@/contexts/AuthContext';
-import { getAccountByMember, createAccount, KnowledgeService, getTagStats } from '@/lib/knowledge';
-import { SUGGESTED_TAGS } from '@/lib/constants';
+import { createAccount, KnowledgeService, getTagStats } from '@/lib/knowledge';
+import { KnowledgeEntry } from '@/lib/constants';
 import ChatInterface from './ChatInterface';
 import KnowledgeHub from './KnowledgeHub';
 
@@ -27,7 +26,7 @@ export default function Dashboard({ accountId, onAccountSetup }: DashboardProps)
   const { user, signout } = useAuth();
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [activeView, setActiveView] = useState('chat');
-  const [recentEntries, setRecentEntries] = useState<any[]>([]);
+  const [recentEntries, setRecentEntries] = useState<KnowledgeEntry[]>([]);
   const [tagStats, setTagStats] = useState<Record<string, number>>({});
   const [loading, setLoading] = useState(false);
   
@@ -105,6 +104,7 @@ export default function Dashboard({ accountId, onAccountSetup }: DashboardProps)
 
   const handleTagClick = useCallback((tag: string) => {
     // TODO: Implement tag filtering in knowledge view
+    console.log('Tag clicked:', tag);
     setActiveView('knowledge');
     setSidebarOpen(false);
   }, []);
@@ -306,19 +306,13 @@ function AccountSetup({ onAccountCreated }: { onAccountCreated: (accountId: stri
   );
 }
 
-// Browse view component
-function BrowseView({ accountId }: { accountId: string }) {
-  return (
-    <div className="p-6">
-      <h2 className="text-2xl font-bold text-gray-900 mb-6">Browse Knowledge</h2>
-      <p className="text-gray-600">Browse and organize your shared knowledge by categories.</p>
-      {/* TODO: Implement knowledge browsing interface */}
-    </div>
-  );
-}
-
 // Settings view component
-function SettingsView({ accountId, recentEntries, tagStats, user }: { accountId: string, recentEntries: any[], tagStats: Record<string, number>, user: any }) {
+function SettingsView({ accountId, recentEntries, tagStats, user }: { 
+  accountId: string; 
+  recentEntries: KnowledgeEntry[]; 
+  tagStats: Record<string, number>; 
+  user: { displayName?: string | null; email?: string | null } | null 
+}) {
   const totalEntries = recentEntries.length;
   const totalTags = Object.keys(tagStats).length;
   const mostUsedTag = Object.entries(tagStats).sort(([, a], [, b]) => b - a)[0];

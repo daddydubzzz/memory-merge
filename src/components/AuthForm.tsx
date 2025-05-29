@@ -37,8 +37,9 @@ export default function AuthForm({ onSuccess }: AuthFormProps) {
         await signin(email, password);
       }
       onSuccess?.();
-    } catch (error: any) {
-      setError(error.message || 'An error occurred');
+    } catch (error: unknown) {
+      const errorMessage = error instanceof Error ? error.message : 'An error occurred';
+      setError(errorMessage);
     }
 
     setLoading(false);
@@ -51,8 +52,9 @@ export default function AuthForm({ onSuccess }: AuthFormProps) {
     try {
       await signInWithGoogle();
       onSuccess?.();
-    } catch (error: any) {
-      setError(error.message || 'An error occurred');
+    } catch (error: unknown) {
+      const errorMessage = error instanceof Error ? error.message : 'An error occurred';
+      setError(errorMessage);
     }
 
     setLoading(false);

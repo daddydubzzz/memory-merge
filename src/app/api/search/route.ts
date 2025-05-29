@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { searchKnowledgeVector, hybridSearch, getRecentKnowledgeVectors, getKnowledgeVectorsByTags } from '@/lib/vector-search';
+import { hybridSearch, getRecentKnowledgeVectors } from '@/lib/vector-search';
 
 export async function POST(request: NextRequest) {
   try {

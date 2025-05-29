@@ -10,11 +10,10 @@ interface KnowledgeHubProps {
 }
 
 export default function KnowledgeHub({ accountId }: KnowledgeHubProps) {
-  const [searchQuery, setSearchQuery] = useState('');
-  const [selectedTags, setSelectedTags] = useState<string[]>([]);
+  const [searchTerm, setSearchTerm] = useState('');
+  const [isLoading, setIsLoading] = useState(false);
+  const [selectedTags] = useState<string[]>([]);
   const [recentEntries, setRecentEntries] = useState<KnowledgeEntry[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [isSearching, setIsSearching] = useState(false);
 
   const knowledgeService = useMemo(() => new KnowledgeService(accountId), [accountId]);
 
@@ -25,7 +24,7 @@ export default function KnowledgeHub({ accountId }: KnowledgeHubProps) {
     } catch (error) {
       console.error('Error loading entries:', error);
     } finally {
-      setLoading(false);
+      setIsLoading(false);
     }
   }, [knowledgeService]);
 
@@ -36,7 +35,7 @@ export default function KnowledgeHub({ accountId }: KnowledgeHubProps) {
       return;
     }
     
-    setIsSearching(true);
+    setIsLoading(true);
     try {
       const results = await knowledgeService.searchKnowledge(
         [query],
@@ -46,25 +45,25 @@ export default function KnowledgeHub({ accountId }: KnowledgeHubProps) {
     } catch (error) {
       console.error('Error searching:', error);
     } finally {
-      setIsSearching(false);
+      setIsLoading(false);
     }
   }, [knowledgeService, selectedTags, loadRecentEntries]);
 
   // Debounced search effect
   useEffect(() => {
     const timeoutId = setTimeout(() => {
-      performSearch(searchQuery);
+      performSearch(searchTerm);
     }, 300); // 300ms debounce
 
     return () => clearTimeout(timeoutId);
-  }, [searchQuery, performSearch]);
+  }, [searchTerm, performSearch]);
 
   useEffect(() => {
     loadRecentEntries();
   }, [loadRecentEntries]);
 
   const handleSearchChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    setSearchQuery(e.target.value);
+    setSearchTerm(e.target.value);
   };
 
   return (
@@ -76,12 +75,12 @@ export default function KnowledgeHub({ accountId }: KnowledgeHubProps) {
             <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-5 h-5" />
             <input
               type="text"
-              value={searchQuery}
+              value={searchTerm}
               onChange={handleSearchChange}
               placeholder="Search your knowledge... (type to search instantly)"
               className="w-full pl-10 pr-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
             />
-            {(isSearching || (searchQuery && loading)) && (
+            {(isLoading || (searchTerm && isLoading)) && (
               <div className="absolute right-3 top-1/2 transform -translate-y-1/2">
                 <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-blue-500"></div>
               </div>
@@ -92,7 +91,7 @@ export default function KnowledgeHub({ accountId }: KnowledgeHubProps) {
         {/* Quick Stats */}
         <div className="flex space-x-4 text-sm text-gray-600">
           <span>
-            {searchQuery.trim() ? `${recentEntries.length} search results` : `${recentEntries.length} entries`}
+            {searchTerm.trim() ? `${recentEntries.length} search results` : `${recentEntries.length} entries`}
           </span>
           <span>•</span>
           <span>Last updated {new Date().toLocaleDateString()}</span>
@@ -101,7 +100,7 @@ export default function KnowledgeHub({ accountId }: KnowledgeHubProps) {
 
       {/* Knowledge Entries */}
       <div className="flex-1 overflow-y-auto p-4">
-        {loading ? (
+        {isLoading ? (
           <div className="text-center py-8">
             <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-500 mx-auto"></div>
             <p className="text-gray-600 mt-2">Loading knowledge...</p>
@@ -109,13 +108,13 @@ export default function KnowledgeHub({ accountId }: KnowledgeHubProps) {
         ) : (
           <div className="space-y-4">
             {recentEntries.map((entry) => (
-              <KnowledgeCard key={entry.id} entry={entry} searchQuery={searchQuery} />
+              <KnowledgeCard key={entry.id} entry={entry} searchQuery={searchTerm} />
             ))}
             {recentEntries.length === 0 && (
               <div className="text-center py-8">
-                {searchQuery.trim() ? (
+                {searchTerm.trim() ? (
                   <>
-                    <p className="text-gray-600">No results found for "{searchQuery}"</p>
+                    <p className="text-gray-600">No results found for &quot;{searchTerm}&quot;</p>
                     <p className="text-sm text-gray-500 mt-1">Try different keywords or check your spelling</p>
                   </>
                 ) : (
