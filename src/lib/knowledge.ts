@@ -10,7 +10,8 @@ import {
   updateDoc,
   deleteDoc,
   serverTimestamp,
-  onSnapshot
+  onSnapshot,
+  getDoc
 } from 'firebase/firestore';
 import { createClient } from '@supabase/supabase-js';
 import { cache, cacheKeys } from './cache';
@@ -985,5 +986,23 @@ export async function getTagStats(accountId: string): Promise<Record<string, num
   } catch (error) {
     console.error('Error getting tag stats:', error);
     return {};
+  }
+}
+
+// Get user display name by user ID
+export async function getUserDisplayName(userId: string): Promise<string> {
+  try {
+    const userRef = doc(db, 'users', userId);
+    const userSnap = await getDoc(userRef);
+    
+    if (userSnap.exists()) {
+      const userData = userSnap.data();
+      return userData.displayName || userData.email?.split('@')[0] || 'Unknown User';
+    } else {
+      return 'Unknown User';
+    }
+  } catch (error) {
+    console.error('Error fetching user:', error);
+    return 'Unknown User';
   }
 } 
