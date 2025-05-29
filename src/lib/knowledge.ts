@@ -11,7 +11,9 @@ import {
   deleteDoc,
   serverTimestamp,
   onSnapshot,
-  getDoc
+  getDoc,
+  arrayUnion,
+  setDoc
 } from 'firebase/firestore';
 import { createClient } from '@supabase/supabase-js';
 import { cache, cacheKeys } from './cache';
@@ -32,6 +34,39 @@ export interface Account {
     allowNotifications: boolean;
     timezone: string;
   };
+}
+
+// New enhanced space management interfaces
+export interface Space {
+  id?: string;
+  name: string;
+  type: 'personal' | 'shared';
+  owner: string;
+  members: string[];
+  inviteCode?: string; // Simple 6-char code for shared spaces
+  icon?: string; // Emoji or icon identifier
+  color?: string; // Theme color
+  settings: SpaceSettings;
+  createdAt: Date;
+  updatedAt?: Date;
+}
+
+export interface SpaceSettings {
+  allowNotifications: boolean;
+  timezone: string;
+  isPublic: boolean; // Whether space can be discovered
+  allowMemberInvites: boolean; // Whether members can invite others
+}
+
+export interface UserProfile {
+  uid: string;
+  personalSpaceId: string; // Auto-created on signup
+  activeSpaceId: string; // Currently selected space
+  spaceMemberships: string[]; // All spaces user belongs to
+  displayName?: string;
+  email?: string;
+  createdAt: Date;
+  updatedAt?: Date;
 }
 
 // Helper function to call API routes
@@ -926,9 +961,23 @@ export async function getAccountByMember(userId: string): Promise<Account | null
 export async function joinAccount(accountId: string, userId: string): Promise<void> {
   try {
     const accountRef = doc(db, 'accounts', accountId);
-    // Note: In a real app, you'd want to check if the account exists and if the user is authorized
+    
+    // Check if the account exists
+    const accountSnap = await getDoc(accountRef);
+    if (!accountSnap.exists()) {
+      throw new Error('Account not found. Please check the invite code.');
+    }
+    
+    const accountData = accountSnap.data();
+    
+    // Check if user is already a member
+    if (accountData.members?.includes(userId)) {
+      throw new Error('You are already a member of this account.');
+    }
+    
+    // Add user to the account
     await updateDoc(accountRef, {
-      members: [userId], // This would need to be an array union in a real implementation
+      members: arrayUnion(userId),
     });
   } catch (error) {
     console.error('Error joining account:', error);
@@ -1004,5 +1053,282 @@ export async function getUserDisplayName(userId: string): Promise<string> {
   } catch (error) {
     console.error('Error fetching user:', error);
     return 'Unknown User';
+  }
+}
+
+// ==========================================
+// ENHANCED SPACE MANAGEMENT FUNCTIONS
+// ==========================================
+
+// Generate a simple 6-character invite code
+function generateInviteCode(): string {
+  const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'; // Avoid confusing characters
+  let result = '';
+  for (let i = 0; i < 6; i++) {
+    result += chars.charAt(Math.floor(Math.random() * chars.length));
+  }
+  return result;
+}
+
+// Create a personal space for a user (called during signup)
+export async function createPersonalSpace(userId: string, userDisplayName?: string, userEmail?: string): Promise<string> {
+  try {
+    // First check if user already has a personal space
+    const existingProfile = await getUserProfile(userId);
+    if (existingProfile) {
+      console.log('⚠️ User already has a profile with personal space:', existingProfile.personalSpaceId);
+      return existingProfile.personalSpaceId;
+    }
+
+    // Check if user already has any personal spaces
+    const userSpaces = await getUserSpaces(userId);
+    const existingPersonalSpace = userSpaces.find(space => space.type === 'personal');
+    if (existingPersonalSpace) {
+      console.log('⚠️ User already has a personal space:', existingPersonalSpace.id);
+      // Create profile pointing to existing space
+      await createOrUpdateUserProfile(userId, existingPersonalSpace.id!, userDisplayName, userEmail);
+      return existingPersonalSpace.id!;
+    }
+
+    console.log('🏗️ Creating new personal space for user:', userId);
+    const personalSpace: Omit<Space, 'id'> = {
+      name: 'My Personal Space',
+      type: 'personal',
+      owner: userId,
+      members: [userId],
+      icon: '🧠',
+      color: 'blue',
+      settings: {
+        allowNotifications: true,
+        timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+        isPublic: false,
+        allowMemberInvites: false, // Personal spaces don't allow invites
+      },
+      createdAt: new Date(),
+    };
+
+    const spaceRef = await addDoc(collection(db, 'spaces'), {
+      ...personalSpace,
+      createdAt: serverTimestamp(),
+    });
+
+    console.log('✅ Personal space created:', spaceRef.id);
+
+    // Create or update user profile
+    await createOrUpdateUserProfile(userId, spaceRef.id, userDisplayName, userEmail);
+
+    return spaceRef.id;
+  } catch (error) {
+    console.error('❌ Error creating personal space:', error);
+    throw error;
+  }
+}
+
+// Create a shared space
+export async function createSharedSpace(
+  userId: string, 
+  name: string, 
+  icon: string = '👥',
+  color: string = 'purple'
+): Promise<{ spaceId: string; inviteCode: string }> {
+  try {
+    const inviteCode = generateInviteCode();
+    
+    const sharedSpace: Omit<Space, 'id'> = {
+      name,
+      type: 'shared',
+      owner: userId,
+      members: [userId],
+      inviteCode,
+      icon,
+      color,
+      settings: {
+        allowNotifications: true,
+        timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+        isPublic: false,
+        allowMemberInvites: true,
+      },
+      createdAt: new Date(),
+    };
+
+    const spaceRef = await addDoc(collection(db, 'spaces'), {
+      ...sharedSpace,
+      createdAt: serverTimestamp(),
+    });
+
+    // Update user profile to include this space
+    await addSpaceToUserProfile(userId, spaceRef.id);
+
+    return { spaceId: spaceRef.id, inviteCode };
+  } catch (error) {
+    console.error('Error creating shared space:', error);
+    throw error;
+  }
+}
+
+// Join a space using invite code
+export async function joinSpaceByInviteCode(inviteCode: string, userId: string): Promise<string> {
+  try {
+    // Find space by invite code
+    const spacesRef = collection(db, 'spaces');
+    const q = query(spacesRef, where('inviteCode', '==', inviteCode));
+    const snapshot = await getDocs(q);
+    
+    if (snapshot.empty) {
+      throw new Error('Invalid invite code. Please check and try again.');
+    }
+
+    const spaceDoc = snapshot.docs[0];
+    const spaceData = spaceDoc.data() as Space;
+    
+    // Check if user is already a member
+    if (spaceData.members?.includes(userId)) {
+      throw new Error('You are already a member of this space.');
+    }
+    
+    // Add user to the space
+    await updateDoc(doc(db, 'spaces', spaceDoc.id), {
+      members: arrayUnion(userId),
+      updatedAt: serverTimestamp(),
+    });
+    
+    // Update user profile
+    await addSpaceToUserProfile(userId, spaceDoc.id);
+
+    return spaceDoc.id;
+  } catch (error) {
+    console.error('Error joining space by invite code:', error);
+    throw error;
+  }
+}
+
+// Create or update user profile
+export async function createOrUpdateUserProfile(
+  userId: string, 
+  personalSpaceId: string, 
+  displayName?: string, 
+  email?: string
+): Promise<void> {
+  try {
+    const userRef = doc(db, 'userProfiles', userId);
+    const userSnap = await getDoc(userRef);
+    
+    if (userSnap.exists()) {
+      // Update existing profile
+      await updateDoc(userRef, {
+        personalSpaceId,
+        activeSpaceId: personalSpaceId,
+        spaceMemberships: arrayUnion(personalSpaceId),
+        ...(displayName && { displayName }),
+        ...(email && { email }),
+        updatedAt: serverTimestamp(),
+      });
+    } else {
+      // Create new profile using userId as document ID
+      const userProfile = {
+        uid: userId,
+        personalSpaceId,
+        activeSpaceId: personalSpaceId,
+        spaceMemberships: [personalSpaceId],
+        displayName,
+        email,
+        createdAt: serverTimestamp(),
+      };
+      
+      await setDoc(userRef, userProfile);
+    }
+  } catch (error) {
+    console.error('Error creating/updating user profile:', error);
+    throw error;
+  }
+}
+
+// Add space to user's memberships
+export async function addSpaceToUserProfile(userId: string, spaceId: string): Promise<void> {
+  try {
+    const userRef = doc(db, 'userProfiles', userId);
+    await updateDoc(userRef, {
+      spaceMemberships: arrayUnion(spaceId),
+      updatedAt: serverTimestamp(),
+    });
+  } catch (error) {
+    console.error('Error adding space to user profile:', error);
+    throw error;
+  }
+}
+
+// Get user's spaces
+export async function getUserSpaces(userId: string): Promise<Space[]> {
+  try {
+    const spacesRef = collection(db, 'spaces');
+    const q = query(spacesRef, where('members', 'array-contains', userId));
+    const snapshot = await getDocs(q);
+    
+    return snapshot.docs.map(doc => ({
+      id: doc.id,
+      ...doc.data(),
+      createdAt: doc.data().createdAt?.toDate() || new Date(),
+      updatedAt: doc.data().updatedAt?.toDate(),
+    })) as Space[];
+  } catch (error) {
+    console.error('Error getting user spaces:', error);
+    return [];
+  }
+}
+
+// Get user profile
+export async function getUserProfile(userId: string): Promise<UserProfile | null> {
+  try {
+    const userRef = doc(db, 'userProfiles', userId);
+    const userSnap = await getDoc(userRef);
+    
+    if (!userSnap.exists()) {
+      return null;
+    }
+
+    return {
+      ...userSnap.data(),
+      createdAt: userSnap.data().createdAt?.toDate() || new Date(),
+      updatedAt: userSnap.data().updatedAt?.toDate(),
+    } as UserProfile;
+  } catch (error) {
+    console.error('Error getting user profile:', error);
+    return null;
+  }
+}
+
+// Update user's active space
+export async function updateActiveSpace(userId: string, spaceId: string): Promise<void> {
+  try {
+    const userRef = doc(db, 'userProfiles', userId);
+    await updateDoc(userRef, {
+      activeSpaceId: spaceId,
+      updatedAt: serverTimestamp(),
+    });
+  } catch (error) {
+    console.error('Error updating active space:', error);
+    throw error;
+  }
+}
+
+// Get space by ID
+export async function getSpaceById(spaceId: string): Promise<Space | null> {
+  try {
+    const spaceRef = doc(db, 'spaces', spaceId);
+    const spaceSnap = await getDoc(spaceRef);
+    
+    if (!spaceSnap.exists()) {
+      return null;
+    }
+
+    return {
+      id: spaceSnap.id,
+      ...spaceSnap.data(),
+      createdAt: spaceSnap.data()?.createdAt?.toDate() || new Date(),
+      updatedAt: spaceSnap.data()?.updatedAt?.toDate(),
+    } as Space;
+  } catch (error) {
+    console.error('Error getting space by ID:', error);
+    return null;
   }
 } 

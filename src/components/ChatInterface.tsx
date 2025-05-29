@@ -343,64 +343,83 @@ export default function ChatInterface({ accountId }: ChatInterfaceProps) {
           </div>
         </div>
 
-        {/* Enhanced Input area */}
-        <div className="bg-white/80 backdrop-blur-xl border-t border-gray-200/50 p-6 shadow-lg">
-          <div className="max-w-4xl mx-auto">
-            <div className="flex space-x-3">
-              <div className="flex-1 relative group">
-                <input
-                  type="text"
-                  value={inputValue}
-                  onChange={(e) => setInputValue(e.target.value)}
-                  onKeyPress={(e) => e.key === 'Enter' && handleSendMessage(inputValue)}
-                  placeholder="Ask a question or share information..."
-                  className="w-full pl-6 pr-16 py-4 bg-gray-50/50 border border-gray-200/50 rounded-2xl focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500/50 focus:bg-white/80 transition-all duration-200 text-gray-900 placeholder-gray-400 text-base group-focus-within:shadow-lg"
-                  disabled={isLoading}
-                />
-                {/* Character count for long messages */}
-                {inputValue.length > 100 && (
-                  <div className="absolute right-16 top-1/2 transform -translate-y-1/2 text-xs text-gray-400 bg-white/80 px-2 py-1 rounded-lg">
-                    {inputValue.length}
+        {/* Enhanced Input area - Mobile Optimized */}
+        <div className="bg-white/90 backdrop-blur-xl border-t border-gray-200/50 shadow-lg">
+          {/* Mobile-first responsive padding */}
+          <div className="p-4 sm:p-6">
+            <div className="max-w-4xl mx-auto">
+              {/* Enhanced listening indicator */}
+              {isListening && (
+                <div className="mb-4 text-center">
+                  <div className="inline-flex items-center bg-red-50/80 backdrop-blur-sm border border-red-200/50 rounded-2xl px-4 py-3">
+                    <div className="w-3 h-3 bg-red-500 rounded-full mr-3 animate-pulse"></div>
+                    <span className="text-sm font-medium text-red-700">Listening... Speak now</span>
                   </div>
-                )}
-              </div>
-              
-              {/* Enhanced voice button */}
-              {recognition && (
-                <button
-                  onClick={isListening ? stopListening : startListening}
-                  className={`px-4 py-4 rounded-2xl transition-all duration-200 font-medium ${
-                    isListening 
-                      ? 'bg-gradient-to-r from-red-500 to-pink-500 text-white shadow-lg shadow-red-500/25 hover:shadow-xl hover:scale-105' 
-                      : 'bg-white/80 backdrop-blur-sm text-gray-600 hover:text-gray-800 border border-gray-200/50 hover:bg-white hover:shadow-lg hover:scale-105'
-                  }`}
-                  disabled={isLoading}
-                  title={isListening ? 'Stop listening' : 'Start voice input'}
-                >
-                  {isListening ? <MicOff className="w-5 h-5" /> : <Mic className="w-5 h-5" />}
-                </button>
+                </div>
               )}
-              
-              {/* Enhanced send button */}
-              <button
-                onClick={() => handleSendMessage(inputValue)}
-                disabled={!inputValue.trim() || isLoading}
-                className="px-6 py-4 bg-gradient-to-r from-blue-600 to-purple-600 hover:from-blue-700 hover:to-purple-700 text-white rounded-2xl font-semibold disabled:opacity-50 disabled:cursor-not-allowed transition-all duration-200 shadow-lg shadow-blue-500/25 hover:shadow-xl hover:scale-105 active:scale-95"
-                title="Send message"
-              >
-                <Send className="w-5 h-5" />
-              </button>
-            </div>
-            
-            {/* Enhanced listening indicator */}
-            {isListening && (
-              <div className="mt-4 text-center">
-                <div className="inline-flex items-center bg-red-50/80 backdrop-blur-sm border border-red-200/50 rounded-2xl px-4 py-2">
-                  <div className="w-3 h-3 bg-red-500 rounded-full mr-3 animate-pulse"></div>
-                  <span className="text-sm font-medium text-red-700">Listening... Speak now</span>
+
+              <div className="flex flex-col sm:flex-row space-y-3 sm:space-y-0 sm:space-x-3">
+                {/* Enhanced input area */}
+                <div className="flex-1 relative group">
+                  <textarea
+                    value={inputValue}
+                    onChange={(e) => setInputValue(e.target.value)}
+                    onKeyPress={(e) => {
+                      if (e.key === 'Enter' && !e.shiftKey) {
+                        e.preventDefault();
+                        handleSendMessage(inputValue);
+                      }
+                    }}
+                    placeholder="Ask a question or share information..."
+                    rows={3}
+                    className="w-full px-5 py-4 bg-gray-50/50 border border-gray-200/50 rounded-2xl focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500/50 focus:bg-white/90 transition-all duration-200 text-gray-900 placeholder-gray-400 text-base leading-6 resize-none group-focus-within:shadow-lg min-h-[3.5rem] sm:min-h-[2.75rem]"
+                    disabled={isLoading}
+                    style={{ maxHeight: '8rem' }}
+                  />
+                  
+                  {/* Character count for long messages */}
+                  {inputValue.length > 100 && (
+                    <div className="absolute right-3 bottom-3 text-xs text-gray-400 bg-white/90 px-2 py-1 rounded-lg shadow-sm">
+                      {inputValue.length}
+                    </div>
+                  )}
+                  
+                  {/* Mobile helper text */}
+                  <div className="mt-2 text-xs text-gray-500 text-center sm:text-left">
+                    Press Enter to send • Shift+Enter for new line
+                  </div>
+                </div>
+                
+                {/* Action buttons - Mobile optimized layout */}
+                <div className="flex space-x-3 sm:flex-col sm:space-x-0 sm:space-y-3 justify-center sm:justify-start">
+                  {/* Enhanced voice button */}
+                  {recognition && (
+                    <button
+                      onClick={isListening ? stopListening : startListening}
+                      className={`flex-1 sm:flex-none px-5 py-4 rounded-2xl transition-all duration-200 font-medium ${
+                        isListening 
+                          ? 'bg-gradient-to-r from-red-500 to-pink-500 text-white shadow-lg shadow-red-500/25 hover:shadow-xl active:scale-95' 
+                          : 'bg-white/80 backdrop-blur-sm text-gray-600 hover:text-gray-800 border border-gray-200/50 hover:bg-white hover:shadow-lg active:scale-95'
+                      }`}
+                      disabled={isLoading}
+                      title={isListening ? 'Stop listening' : 'Start voice input'}
+                    >
+                      {isListening ? <MicOff className="w-5 h-5 mx-auto" /> : <Mic className="w-5 h-5 mx-auto" />}
+                    </button>
+                  )}
+                  
+                  {/* Enhanced send button */}
+                  <button
+                    onClick={() => handleSendMessage(inputValue)}
+                    disabled={!inputValue.trim() || isLoading}
+                    className="flex-1 sm:flex-none px-6 py-4 bg-gradient-to-r from-blue-600 to-purple-600 hover:from-blue-700 hover:to-purple-700 text-white rounded-2xl font-semibold disabled:opacity-50 disabled:cursor-not-allowed transition-all duration-200 shadow-lg shadow-blue-500/25 hover:shadow-xl active:scale-95 min-h-[3.5rem] sm:min-h-[2.75rem] flex items-center justify-center"
+                    title="Send message"
+                  >
+                    <Send className="w-5 h-5" />
+                  </button>
                 </div>
               </div>
-            )}
+            </div>
           </div>
         </div>
       </div>

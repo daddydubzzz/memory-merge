@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useEffect, useMemo, useCallback } from 'react';
+import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import { 
   MessageCircle, 
   Settings, 
@@ -12,29 +12,52 @@ import {
   Heart
 } from 'lucide-react';
 import { useAuth } from '@/contexts/AuthContext';
-import { createAccount, KnowledgeService, getTagStats } from '@/lib/knowledge';
+import { 
+  createPersonalSpace, 
+  getUserProfile, 
+  getUserSpaces, 
+  joinSpaceByInviteCode,
+  KnowledgeService, 
+  getTagStats,
+  type Space,
+  type UserProfile 
+} from '@/lib/knowledge';
 import { KnowledgeEntry } from '@/lib/constants';
 import ChatInterface from './ChatInterface';
 import KnowledgeHub from './KnowledgeHub';
+import SpaceSwitcher from './SpaceSwitcher';
+import CreateSpaceModal from './CreateSpaceModal';
+import JoinSpaceModal from './JoinSpaceModal';
 
 interface DashboardProps {
-  accountId: string | null;
-  onAccountSetup: (accountId: string) => void;
+  // Remove accountId prop since we'll manage spaces internally
 }
 
-export default function Dashboard({ accountId, onAccountSetup }: DashboardProps) {
+export default function Dashboard({}: DashboardProps) {
   const { user, signout } = useAuth();
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [activeView, setActiveView] = useState('chat');
   const [recentEntries, setRecentEntries] = useState<KnowledgeEntry[]>([]);
   const [tagStats, setTagStats] = useState<Record<string, number>>({});
-  const [loading, setLoading] = useState(false);
+  const [loading, setLoading] = useState(true);
   const [selectedTag, setSelectedTag] = useState<string | null>(null);
   
-  // Memoize knowledge service to prevent recreation on every render
+  // New space management state
+  const [userProfile, setUserProfile] = useState<UserProfile | null>(null);
+  const [currentSpaceId, setCurrentSpaceId] = useState<string | null>(null);
+  const [spaces, setSpaces] = useState<Space[]>([]);
+  const [showCreateSpaceModal, setShowCreateSpaceModal] = useState(false);
+  const [showJoinSpaceModal, setShowJoinSpaceModal] = useState(false);
+  const [isInitializing, setIsInitializing] = useState(true);
+  
+  // Add ref to prevent duplicate initialization
+  const initializationRef = useRef(false);
+  const currentUserRef = useRef<string | null>(null);
+  
+  // Memoize knowledge service based on current space
   const knowledgeService = useMemo(() => 
-    accountId ? new KnowledgeService(accountId) : null, 
-    [accountId]
+    currentSpaceId ? new KnowledgeService(currentSpaceId) : null, 
+    [currentSpaceId]
   );
 
   // Memoize expensive computations
@@ -52,21 +75,81 @@ export default function Dashboard({ accountId, onAccountSetup }: DashboardProps)
     { id: 'settings', label: 'Settings', icon: Settings }
   ];
 
-  // Load recent entries and tag stats (only when accountId changes)
+  // Initialize user and create personal space if needed
   useEffect(() => {
-    if (!knowledgeService || !accountId) return;
+    if (!user) {
+      // Reset when user logs out
+      initializationRef.current = false;
+      currentUserRef.current = null;
+      return;
+    }
+
+    // Prevent duplicate initialization for the same user
+    if (initializationRef.current && currentUserRef.current === user.uid) {
+      return;
+    }
+
+    const initializeUser = async () => {
+      // Set initialization flags
+      initializationRef.current = true;
+      currentUserRef.current = user.uid;
+      setIsInitializing(true);
+      
+      try {
+        console.log('🔄 Initializing user:', user.uid);
+        
+        // Get user profile
+        let profile = await getUserProfile(user.uid);
+        console.log('📋 User profile:', profile ? 'found' : 'not found');
+        
+        if (!profile) {
+          console.log('🏗️ Creating personal space for new user...');
+          const personalSpaceId = await createPersonalSpace(
+            user.uid, 
+            user.displayName || undefined, 
+            user.email || undefined
+          );
+          
+          // Get the updated profile
+          profile = await getUserProfile(user.uid);
+          console.log('✅ Personal space created:', personalSpaceId);
+        } else {
+          console.log('✅ Using existing user profile');
+        }
+
+        if (profile) {
+          setUserProfile(profile);
+          setCurrentSpaceId(profile.activeSpaceId);
+          
+          // Load user's spaces
+          const userSpaces = await getUserSpaces(user.uid);
+          setSpaces(userSpaces);
+          console.log('📚 Loaded spaces:', userSpaces.length);
+        }
+      } catch (error) {
+        console.error('❌ Error initializing user:', error);
+        // Reset initialization flag on error so it can be retried
+        initializationRef.current = false;
+      }
+      setIsInitializing(false);
+      setLoading(false);
+    };
+
+    initializeUser();
+  }, [user]);
+
+  // Load dashboard data when space changes
+  useEffect(() => {
+    if (!knowledgeService || !currentSpaceId || isInitializing) return;
 
     let mounted = true;
     
     const loadData = async () => {
-      if (loading) return; // Prevent multiple simultaneous loads
-      
-      setLoading(true);
       try {
         // Load both in parallel for better performance
         const [entries, stats] = await Promise.all([
           knowledgeService.getRecentKnowledge(10),
-          getTagStats(accountId)
+          getTagStats(currentSpaceId)
         ]);
         
         if (mounted) {
@@ -75,10 +158,6 @@ export default function Dashboard({ accountId, onAccountSetup }: DashboardProps)
         }
       } catch (error) {
         console.error('Error loading dashboard data:', error);
-      } finally {
-        if (mounted) {
-          setLoading(false);
-        }
       }
     };
 
@@ -87,7 +166,7 @@ export default function Dashboard({ accountId, onAccountSetup }: DashboardProps)
     return () => {
       mounted = false;
     };
-  }, [accountId, knowledgeService, loading]); // Added loading dependency
+  }, [currentSpaceId, knowledgeService, isInitializing]);
 
   // Memoize callbacks to prevent unnecessary re-renders
   const handleSignOut = useCallback(async () => {
@@ -117,9 +196,77 @@ export default function Dashboard({ accountId, onAccountSetup }: DashboardProps)
     setSelectedTag(null);
   }, []);
 
-  // If no account, show setup screen
-  if (!accountId) {
-    return <AccountSetup onAccountCreated={onAccountSetup} />;
+  const handleSpaceChange = useCallback((spaceId: string) => {
+    setCurrentSpaceId(spaceId);
+    // Clear any existing data when switching spaces
+    setRecentEntries([]);
+    setTagStats({});
+    setSelectedTag(null);
+  }, []);
+
+  const handleCreateSpace = useCallback(() => {
+    setShowCreateSpaceModal(true);
+  }, []);
+
+  const handleJoinSpace = useCallback(() => {
+    setShowJoinSpaceModal(true);
+  }, []);
+
+  const handleSpaceCreated = useCallback(async (spaceId: string) => {
+    // Refresh user's spaces and switch to new space
+    try {
+      const userSpaces = await getUserSpaces(user!.uid);
+      setSpaces(userSpaces);
+      setCurrentSpaceId(spaceId);
+      setShowCreateSpaceModal(false);
+    } catch (error) {
+      console.error('Error refreshing spaces:', error);
+    }
+  }, [user]);
+
+  const handleSpaceJoined = useCallback(async (spaceId: string) => {
+    // Refresh user's spaces and switch to joined space
+    try {
+      const userSpaces = await getUserSpaces(user!.uid);
+      setSpaces(userSpaces);
+      setCurrentSpaceId(spaceId);
+      setShowJoinSpaceModal(false);
+    } catch (error) {
+      console.error('Error refreshing spaces:', error);
+    }
+  }, [user]);
+
+  // Show loading screen during initialization
+  if (isInitializing || loading) {
+    return (
+      <div className="min-h-screen bg-gradient-to-br from-slate-50 via-blue-50 to-indigo-100 flex items-center justify-center">
+        <div className="text-center">
+          <div className="w-16 h-16 bg-gradient-to-r from-pink-500 to-rose-500 rounded-2xl flex items-center justify-center shadow-lg shadow-pink-500/25 mx-auto mb-6 animate-pulse">
+            <Heart className="w-8 h-8 text-white" fill="currentColor" />
+          </div>
+          <h2 className="text-2xl font-bold text-gray-800 mb-2">Setting up your space...</h2>
+          <p className="text-gray-600">This will just take a moment</p>
+        </div>
+      </div>
+    );
+  }
+
+  // If no current space (shouldn't happen with new system, but fallback)
+  if (!currentSpaceId) {
+    return (
+      <div className="min-h-screen bg-gradient-to-br from-slate-50 via-blue-50 to-indigo-100 flex items-center justify-center">
+        <div className="text-center">
+          <h2 className="text-2xl font-bold text-gray-800 mb-2">No space available</h2>
+          <p className="text-gray-600 mb-4">Something went wrong. Please refresh the page.</p>
+          <button
+            onClick={() => window.location.reload()}
+            className="px-6 py-3 bg-blue-600 text-white rounded-xl hover:bg-blue-700 transition-colors"
+          >
+            Refresh Page
+          </button>
+        </div>
+      </div>
+    );
   }
 
   const sidebarContent = (
@@ -147,6 +294,16 @@ export default function Dashboard({ accountId, onAccountSetup }: DashboardProps)
             Welcome back, {user?.displayName || user?.email?.split('@')[0] || 'User'}! 👋
           </p>
         </div>
+      </div>
+
+      {/* Space Switcher */}
+      <div className="relative p-6 border-b border-white/10">
+        <SpaceSwitcher
+          currentSpaceId={currentSpaceId}
+          onSpaceChange={handleSpaceChange}
+          onCreateSpace={handleCreateSpace}
+          onJoinSpace={handleJoinSpace}
+        />
       </div>
 
       {/* Navigation */}
@@ -198,22 +355,27 @@ export default function Dashboard({ accountId, onAccountSetup }: DashboardProps)
                       selectedTag === tag ? 'opacity-100' : 'opacity-60 group-hover:opacity-100'
                     }`}></div>
                     <span className={`transition-colors font-medium ${
-                      selectedTag === tag ? 'text-white' : 'text-gray-300 group-hover:text-white'
-                    }`}>{tag}</span>
+                      selectedTag === tag ? 'text-white' : 'text-gray-400 group-hover:text-gray-300'
+                    }`}>
+                      {tag}
+                    </span>
                   </div>
-                  <div className={`text-xs px-2 py-1 rounded-lg font-semibold transition-colors ${
+                  <span className={`text-xs px-2 py-1 rounded-full transition-colors ${
                     selectedTag === tag 
-                      ? 'bg-blue-400/30 text-white' 
-                      : 'bg-white/10 text-gray-400 group-hover:text-white'
+                      ? 'bg-blue-500/30 text-blue-100' 
+                      : 'bg-white/10 text-gray-400 group-hover:bg-white/20 group-hover:text-gray-300'
                   }`}>
                     {count}
-                  </div>
+                  </span>
                 </div>
               ))
             ) : (
-              <div className="bg-white/5 border border-white/10 rounded-xl px-3 py-4 text-center">
-                <p className="text-sm text-gray-500 mb-1">No tags yet</p>
-                <p className="text-xs text-gray-600">Start adding memories to see popular tags</p>
+              <div className="text-center py-8">
+                <div className="w-12 h-12 bg-white/5 rounded-2xl flex items-center justify-center mx-auto mb-3">
+                  <Archive className="w-6 h-6 text-gray-500" />
+                </div>
+                <p className="text-sm text-gray-500">No tags yet</p>
+                <p className="text-xs text-gray-600 mt-1">Add knowledge to see popular tags</p>
               </div>
             )}
           </div>
@@ -221,12 +383,12 @@ export default function Dashboard({ accountId, onAccountSetup }: DashboardProps)
       </nav>
 
       {/* Footer */}
-      <div className="relative p-6 border-t border-white/10 backdrop-blur-sm">
+      <div className="p-6 border-t border-white/10 relative">
         <button
           onClick={handleSignOut}
-          className="w-full flex items-center px-4 py-3 text-gray-300 hover:text-white bg-white/5 hover:bg-red-500/20 rounded-2xl transition-all duration-200 group border border-white/10 hover:border-red-500/30 backdrop-blur-sm"
+          className="w-full flex items-center px-4 py-3 text-gray-300 hover:text-white hover:bg-white/10 rounded-2xl transition-all duration-200 group border border-transparent hover:border-white/10"
         >
-          <LogOut className="w-5 h-5 mr-3 group-hover:scale-110 transition-transform" />
+          <LogOut className="w-5 h-5 mr-3 transition-transform group-hover:scale-110" />
           <span className="font-medium">Sign Out</span>
         </button>
       </div>
@@ -234,196 +396,98 @@ export default function Dashboard({ accountId, onAccountSetup }: DashboardProps)
   );
 
   return (
-    <div className="h-screen flex bg-gray-100">
-      {/* Mobile sidebar overlay */}
-      {sidebarOpen && (
-        <div className="fixed inset-0 z-40 lg:hidden">
-          <div className="fixed inset-0 bg-black opacity-50" onClick={() => setSidebarOpen(false)} />
-          <div className="fixed left-0 top-0 bottom-0 w-64 z-50">
-            {sidebarContent}
-          </div>
+    <>
+      <div className="flex h-screen bg-gray-50">
+        {/* Mobile menu button */}
+        <button
+          onClick={() => setSidebarOpen(true)}
+          className="lg:hidden fixed top-4 left-4 z-30 p-3 bg-white/80 backdrop-blur-xl rounded-2xl shadow-lg border border-white/20 text-gray-700 hover:text-gray-900 transition-colors"
+        >
+          <Menu className="w-5 h-5" />
+        </button>
+
+        {/* Sidebar for larger screens */}
+        <div className="hidden lg:flex lg:w-80 lg:flex-col">
+          {sidebarContent}
         </div>
-      )}
 
-      {/* Desktop sidebar */}
-      <div className="hidden lg:block w-64 bg-gray-900">
-        {sidebarContent}
-      </div>
-
-      {/* Main content */}
-      <div className="flex-1 flex flex-col">
-        {/* Mobile header */}
-        <div className="lg:hidden bg-white/80 backdrop-blur-xl border-b border-gray-200/50 p-4 shadow-sm">
-          <div className="flex items-center justify-between">
-            <button
-              onClick={() => setSidebarOpen(true)}
-              className="p-2 rounded-xl hover:bg-gray-100/80 transition-all duration-200 hover:scale-110 active:scale-95"
-            >
-              <Menu className="w-5 h-5 text-gray-700" />
-            </button>
-            <div className="flex items-center">
-              <div className="relative mr-2">
-                <div className="w-6 h-6 bg-gradient-to-r from-pink-500 to-rose-500 rounded-lg flex items-center justify-center shadow-lg shadow-pink-500/25">
-                  <Heart className="w-4 h-4 text-white" fill="currentColor" />
-                </div>
-              </div>
-              <h1 className="text-lg font-bold bg-gradient-to-r from-gray-900 via-blue-900 to-purple-900 bg-clip-text text-transparent">
-                Memory Merge
-              </h1>
+        {/* Mobile sidebar overlay */}
+        {sidebarOpen && (
+          <div className="lg:hidden fixed inset-0 z-40 flex">
+            <div
+              className="fixed inset-0 bg-black/50 backdrop-blur-sm"
+              onClick={() => setSidebarOpen(false)}
+            />
+            <div className="relative flex w-80 flex-col">
+              {sidebarContent}
             </div>
-            <div className="w-9" /> {/* Spacer */}
           </div>
-        </div>
+        )}
 
-        {/* Content area */}
-        <div className="flex-1">
-          {activeView === 'chat' && <ChatInterface accountId={accountId} />}
-          {activeView === 'knowledge' && <KnowledgeHub accountId={accountId} selectedTag={selectedTag} onClearTagFilter={handleClearTagFilter} />}
-          {activeView === 'settings' && (
+        {/* Main content */}
+        <div className="flex-1 flex flex-col overflow-hidden">
+          {activeView === 'chat' && currentSpaceId && (
+            <ChatInterface accountId={currentSpaceId} />
+          )}
+          {activeView === 'knowledge' && currentSpaceId && (
+            <KnowledgeHub 
+              accountId={currentSpaceId}
+              selectedTag={selectedTag}
+              onClearTagFilter={handleClearTagFilter}
+            />
+          )}
+          {activeView === 'settings' && currentSpaceId && (
             <SettingsView 
-              accountId={accountId} 
+              accountId={currentSpaceId} 
               recentEntries={recentEntries} 
               tagStats={tagStats} 
-              user={user} 
+              user={user}
+              spaces={spaces}
+              currentSpace={spaces.find(s => s.id === currentSpaceId) || null}
             />
           )}
         </div>
       </div>
-    </div>
-  );
-}
 
-// Account setup component
-function AccountSetup({ onAccountCreated }: { onAccountCreated: (accountId: string) => void }) {
-  const { user } = useAuth();
-  const [loading, setLoading] = useState(false);
-  const [inviteCode, setInviteCode] = useState('');
-
-  const handleCreateAccount = async () => {
-    if (!user) return;
-    
-    setLoading(true);
-    try {
-      const accountId = await createAccount([user.uid]);
-      onAccountCreated(accountId);
-    } catch (error) {
-      console.error('Error creating account:', error);
-    }
-    setLoading(false);
-  };
-
-  return (
-    <div className="min-h-screen bg-gradient-to-br from-slate-50 via-blue-50 to-indigo-100 flex items-center justify-center p-4 relative overflow-hidden">
-      {/* Background decoration */}
-      <div className="absolute inset-0 overflow-hidden pointer-events-none">
-        <div className="absolute top-1/4 left-1/4 w-64 h-64 bg-gradient-to-r from-blue-200/30 to-purple-200/30 rounded-full blur-3xl animate-pulse"></div>
-        <div className="absolute bottom-1/4 right-1/4 w-80 h-80 bg-gradient-to-r from-pink-200/20 to-orange-200/20 rounded-full blur-3xl animate-pulse delay-1000"></div>
-      </div>
-
-      <div className="relative w-full max-w-lg">
-        {/* Main Card */}
-        <div className="bg-white/80 backdrop-blur-xl rounded-3xl shadow-2xl shadow-blue-500/10 border border-white/20 p-8 sm:p-10">
-          {/* Header */}
-          <div className="text-center mb-10">
-            <div className="flex justify-center mb-6">
-              <div className="relative">
-                <div className="w-16 h-16 bg-gradient-to-r from-pink-500 to-rose-500 rounded-2xl flex items-center justify-center shadow-lg shadow-pink-500/25">
-                  <Heart className="w-8 h-8 text-white" fill="currentColor" />
-                </div>
-                <div className="absolute -top-1 -right-1 w-6 h-6 bg-gradient-to-r from-blue-400 to-cyan-400 rounded-full flex items-center justify-center animate-pulse">
-                  <Plus className="w-3 h-3 text-white" />
-                </div>
-              </div>
-            </div>
-            <h1 className="text-3xl font-bold bg-gradient-to-r from-gray-900 via-blue-900 to-purple-900 bg-clip-text text-transparent mb-4">
-              Create Your Shared Space
-            </h1>
-            <p className="text-gray-600/80 text-lg leading-relaxed max-w-md mx-auto">
-              Set up a shared knowledge space that you and your team, group, or collaborators can all access and contribute to
-            </p>
-          </div>
-
-          <div className="space-y-6">
-            {/* Create Account Button */}
-            <button
-              onClick={handleCreateAccount}
-              disabled={loading}
-              className="w-full bg-gradient-to-r from-blue-600 to-purple-600 hover:from-blue-700 hover:to-purple-700 text-white py-4 px-6 rounded-2xl font-semibold text-base disabled:opacity-50 disabled:cursor-not-allowed transition-all duration-200 shadow-lg shadow-blue-500/25 hover:shadow-xl hover:shadow-blue-500/30 hover:scale-[1.02] active:scale-[0.98] flex items-center justify-center group"
-            >
-              {loading ? (
-                <div className="flex items-center">
-                  <div className="w-5 h-5 border-2 border-white/30 border-t-white rounded-full animate-spin mr-2"></div>
-                  Creating Space...
-                </div>
-              ) : (
-                <>
-                  <Plus className="w-5 h-5 mr-2 group-hover:scale-110 transition-transform" />
-                  Create Knowledge Space
-                </>
-              )}
-            </button>
-
-            {/* Divider */}
-            <div className="relative">
-              <div className="absolute inset-0 flex items-center">
-                <div className="w-full border-t border-gray-200/60" />
-              </div>
-              <div className="relative flex justify-center text-sm">
-                <span className="px-4 bg-white/80 text-gray-500 font-medium backdrop-blur-sm">or join existing</span>
-              </div>
-            </div>
-
-            {/* Join Account Section */}
-            <div className="space-y-4">
-              <div className="space-y-2">
-                <label htmlFor="inviteCode" className="block text-sm font-semibold text-gray-700">
-                  Invite Code
-                </label>
-                <div className="relative group">
-                  <Users className="absolute left-4 top-1/2 transform -translate-y-1/2 text-gray-400 w-5 h-5 group-focus-within:text-blue-500 transition-colors" />
-                  <input
-                    id="inviteCode"
-                    type="text"
-                    value={inviteCode}
-                    onChange={(e) => setInviteCode(e.target.value)}
-                    placeholder="Enter invite code from another member"
-                    className="w-full pl-12 pr-4 py-4 bg-gray-50/50 border border-gray-200/50 rounded-2xl focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500/50 focus:bg-white/80 transition-all duration-200 text-gray-900 placeholder-gray-400"
-                  />
-                </div>
-              </div>
-              
-              <button
-                disabled={!inviteCode.trim() || loading}
-                className="w-full bg-white/80 backdrop-blur-sm border border-gray-200/50 text-gray-700 py-4 px-6 rounded-2xl font-semibold text-base hover:bg-white hover:shadow-lg hover:shadow-gray-500/10 disabled:opacity-50 disabled:cursor-not-allowed transition-all duration-200 flex items-center justify-center group hover:scale-[1.02] active:scale-[0.98]"
-              >
-                <Users className="w-5 h-5 mr-2 group-hover:scale-110 transition-transform" />
-                Join Existing Account
-              </button>
-            </div>
-          </div>
-        </div>
-
-        {/* Footer */}
-        <div className="text-center mt-8">
-          <p className="text-sm text-gray-500/80">
-            🚀 Ready to merge memories together
-          </p>
-        </div>
-      </div>
-    </div>
+      {/* Modals */}
+      <CreateSpaceModal
+        isOpen={showCreateSpaceModal}
+        onClose={() => setShowCreateSpaceModal(false)}
+        onSpaceCreated={handleSpaceCreated}
+      />
+      <JoinSpaceModal
+        isOpen={showJoinSpaceModal}
+        onClose={() => setShowJoinSpaceModal(false)}
+        onSpaceJoined={handleSpaceJoined}
+      />
+    </>
   );
 }
 
 // Settings view component
-function SettingsView({ accountId, recentEntries, tagStats, user }: { 
+function SettingsView({ accountId, recentEntries, tagStats, user, spaces, currentSpace }: { 
   accountId: string; 
   recentEntries: KnowledgeEntry[]; 
   tagStats: Record<string, number>; 
-  user: { displayName?: string | null; email?: string | null } | null 
+  user: { displayName?: string | null; email?: string | null } | null;
+  spaces: Space[];
+  currentSpace: Space | null;
 }) {
   const totalEntries = recentEntries.length;
   const totalTags = Object.keys(tagStats).length;
   const mostUsedTag = Object.entries(tagStats).sort(([, a], [, b]) => b - a)[0];
+
+  const getSpaceColor = (space: Space) => {
+    const colors = {
+      blue: 'from-blue-500 to-blue-600',
+      purple: 'from-purple-500 to-purple-600',
+      green: 'from-green-500 to-green-600',
+      orange: 'from-orange-500 to-orange-600',
+      pink: 'from-pink-500 to-pink-600',
+      red: 'from-red-500 to-red-600',
+    };
+    return colors[space.color as keyof typeof colors] || colors.blue;
+  };
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-50 via-blue-50 to-indigo-100 relative overflow-hidden">
@@ -445,7 +509,7 @@ function SettingsView({ accountId, recentEntries, tagStats, user }: {
                 Settings
               </h1>
               <p className="text-gray-600/80 text-lg">
-                Manage your account and view usage statistics
+                Manage your space and view usage statistics
               </p>
             </div>
           </div>
@@ -455,53 +519,74 @@ function SettingsView({ accountId, recentEntries, tagStats, user }: {
         <div className="flex-1 overflow-y-auto">
           <div className="max-w-4xl mx-auto p-6">
             <div className="grid gap-8 lg:grid-cols-2">
-              {/* Account Information */}
+              {/* Current Space Information */}
               <div className="bg-white/80 backdrop-blur-xl rounded-3xl shadow-2xl shadow-blue-500/10 border border-white/20 p-8 group hover:shadow-2xl hover:shadow-blue-500/15 transition-all duration-300">
                 <div className="flex items-center mb-6">
                   <div className="w-12 h-12 bg-gradient-to-r from-blue-500 to-purple-500 rounded-2xl flex items-center justify-center shadow-lg shadow-blue-500/25 mr-4">
-                    <Settings className="w-6 h-6 text-white" />
+                    <Users className="w-6 h-6 text-white" />
                   </div>
                   <h3 className="text-2xl font-bold bg-gradient-to-r from-gray-900 to-blue-900 bg-clip-text text-transparent">
-                    Account Information
+                    Current Space
                   </h3>
                 </div>
                 
-                <div className="space-y-6">
-                  <div>
-                    <label className="block text-sm font-semibold text-gray-700 mb-2">Account ID</label>
-                    <div className="relative group">
-                      <div className="p-4 bg-gray-50/50 border border-gray-200/50 rounded-2xl text-sm text-gray-800 font-mono break-all group-hover:bg-white/80 transition-all duration-200">
-                        {accountId}
-                      </div>
-                      <button 
-                        onClick={() => navigator.clipboard.writeText(accountId)}
-                        className="absolute right-3 top-1/2 transform -translate-y-1/2 opacity-0 group-hover:opacity-100 transition-opacity bg-blue-500 hover:bg-blue-600 text-white px-3 py-1 rounded-lg text-xs font-medium"
-                      >
-                        Copy
-                      </button>
-                    </div>
-                    <p className="text-xs text-gray-500 mt-2 leading-relaxed">
-                      Share this ID with others to invite them to your knowledge space
-                    </p>
-                  </div>
-                  
-                  <div>
-                    <label className="block text-sm font-semibold text-gray-700 mb-2">Signed in as</label>
-                    <div className="bg-gradient-to-r from-blue-50 to-purple-50 border border-blue-200/50 rounded-2xl p-4">
-                      <div className="flex items-center">
-                        <div className="w-10 h-10 bg-gradient-to-r from-blue-500 to-purple-500 rounded-xl flex items-center justify-center text-white font-bold text-sm mr-3">
-                          {(user?.displayName || user?.email || 'U')[0].toUpperCase()}
+                {currentSpace && (
+                  <div className="space-y-6">
+                    {/* Space Display */}
+                    <div className="bg-gradient-to-r from-gray-50 to-gray-100/50 rounded-2xl p-4 border border-gray-200/50">
+                      <div className="flex items-center space-x-4">
+                        <div className={`w-12 h-12 bg-gradient-to-r ${getSpaceColor(currentSpace)} rounded-xl flex items-center justify-center text-white text-xl shadow-lg`}>
+                          {currentSpace.icon || '👥'}
                         </div>
-                        <div>
-                          <p className="text-sm font-semibold text-gray-800">
-                            {user?.displayName || 'User'}
+                        <div className="flex-1">
+                          <h4 className="text-lg font-bold text-gray-800">{currentSpace.name}</h4>
+                          <p className="text-sm text-gray-600">
+                            {currentSpace.type === 'personal' ? 'Personal space' : 'Shared space'} • {currentSpace.members.length} member{currentSpace.members.length !== 1 ? 's' : ''}
                           </p>
-                          <p className="text-xs text-gray-600">{user?.email}</p>
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Space ID for sharing (only for shared spaces) */}
+                    {currentSpace.type === 'shared' && currentSpace.inviteCode && (
+                      <div>
+                        <label className="block text-sm font-semibold text-gray-700 mb-2">Invite Code</label>
+                        <div className="relative group">
+                          <div className="p-4 bg-gray-50/50 border border-gray-200/50 rounded-2xl text-sm text-gray-800 font-mono text-center text-lg font-bold group-hover:bg-white/80 transition-all duration-200">
+                            {currentSpace.inviteCode}
+                          </div>
+                          <button 
+                            onClick={() => navigator.clipboard.writeText(currentSpace.inviteCode!)}
+                            className="absolute right-3 top-1/2 transform -translate-y-1/2 opacity-0 group-hover:opacity-100 transition-opacity bg-blue-500 hover:bg-blue-600 text-white px-3 py-1 rounded-lg text-xs font-medium"
+                          >
+                            Copy
+                          </button>
+                        </div>
+                        <p className="text-xs text-gray-500 mt-2 leading-relaxed">
+                          Share this code with others to invite them to this space
+                        </p>
+                      </div>
+                    )}
+                    
+                    {/* User info */}
+                    <div>
+                      <label className="block text-sm font-semibold text-gray-700 mb-2">Signed in as</label>
+                      <div className="bg-gradient-to-r from-blue-50 to-purple-50 border border-blue-200/50 rounded-2xl p-4">
+                        <div className="flex items-center">
+                          <div className="w-10 h-10 bg-gradient-to-r from-blue-500 to-purple-500 rounded-xl flex items-center justify-center text-white font-bold text-sm mr-3">
+                            {(user?.displayName || user?.email || 'U')[0].toUpperCase()}
+                          </div>
+                          <div>
+                            <p className="text-sm font-semibold text-gray-800">
+                              {user?.displayName || 'User'}
+                            </p>
+                            <p className="text-xs text-gray-600">{user?.email}</p>
+                          </div>
                         </div>
                       </div>
                     </div>
                   </div>
-                </div>
+                )}
               </div>
 
               {/* Usage Statistics */}
@@ -539,16 +624,28 @@ function SettingsView({ accountId, recentEntries, tagStats, user }: {
                       </span>
                     </div>
                   </div>
+
+                  <div className="bg-gradient-to-r from-purple-50 to-violet-100/50 border border-purple-200/50 rounded-2xl p-4">
+                    <div className="flex justify-between items-center">
+                      <div className="flex items-center">
+                        <div className="w-3 h-3 bg-gradient-to-r from-purple-500 to-violet-600 rounded-full mr-3"></div>
+                        <span className="text-sm font-semibold text-gray-700">Total Spaces</span>
+                      </div>
+                      <span className="text-2xl font-bold bg-gradient-to-r from-purple-600 to-violet-700 bg-clip-text text-transparent">
+                        {spaces.length}
+                      </span>
+                    </div>
+                  </div>
                   
                   {mostUsedTag && (
-                    <div className="bg-gradient-to-r from-purple-50 to-violet-100/50 border border-purple-200/50 rounded-2xl p-4">
+                    <div className="bg-gradient-to-r from-orange-50 to-orange-100/50 border border-orange-200/50 rounded-2xl p-4">
                       <div className="flex justify-between items-center">
                         <div className="flex items-center">
-                          <div className="w-3 h-3 bg-gradient-to-r from-purple-500 to-violet-600 rounded-full mr-3"></div>
+                          <div className="w-3 h-3 bg-gradient-to-r from-orange-500 to-orange-600 rounded-full mr-3"></div>
                           <span className="text-sm font-semibold text-gray-700">Most Used Tag</span>
                         </div>
                         <div className="text-right">
-                          <div className="text-sm font-bold bg-gradient-to-r from-purple-600 to-violet-700 bg-clip-text text-transparent">
+                          <div className="text-sm font-bold bg-gradient-to-r from-orange-600 to-orange-700 bg-clip-text text-transparent">
                             {mostUsedTag[0]}
                           </div>
                           <div className="text-xs text-gray-500">
