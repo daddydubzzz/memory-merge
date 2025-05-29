@@ -16,18 +16,25 @@ export {
   CATEGORY_TO_TAGS_MAP 
 } from './types';
 
-// For now, all services are still in the main knowledge.ts file
-// These will be moved in subsequent phases
-export { KnowledgeService } from '../knowledge';
+// Phase 3: Export the new unified service as KnowledgeService for backward compatibility
+export { UnifiedKnowledgeService as KnowledgeService } from './services/unified-knowledge-service';
 
-// Account management functions
+// Export individual services for advanced usage
+export {
+  KnowledgeCRUDService,
+  KnowledgeSearchService,
+  RevisionService,
+  ShoppingListService
+} from './services';
+
+// Account management functions - now from account-service
 export { 
   createAccount,
   getAccountByMember,
   joinAccount
-} from '../knowledge';
+} from './services/account-service';
 
-// Space management functions
+// Space management functions - now from space-service
 export {
   createPersonalSpace,
   createSharedSpace,
@@ -38,9 +45,9 @@ export {
   updateActiveSpace,
   getSpaceById,
   cleanupDuplicatePersonalSpaces
-} from '../knowledge';
+} from './services/space-service';
 
-// Share link management functions
+// Share link management functions - now from share-link-service
 export {
   createShareLink,
   getShareLinkByToken,
@@ -48,10 +55,10 @@ export {
   joinSpaceByShareLink,
   getSpaceShareLinks,
   deactivateShareLink
-} from '../knowledge';
+} from './services/share-link-service';
 
-// Utility functions
+// Utility functions - now from utility-service
 export {
   getTagStats,
   getUserDisplayName
-} from '../knowledge'; 
+} from './services/utility-service'; 
