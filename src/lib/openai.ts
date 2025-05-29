@@ -1,6 +1,6 @@
 import OpenAI from 'openai';
 import { z } from 'zod';
-import type { KnowledgeEntry } from './constants';
+import type { KnowledgeEntry } from './knowledge/types';
 
 // Create OpenAI client - this should only be used server-side
 function createOpenAIClient() {
@@ -10,7 +10,7 @@ function createOpenAIClient() {
 }
 
 // Export interfaces from constants
-export type { KnowledgeEntry } from './constants';
+export type { KnowledgeEntry } from './knowledge/types';
 
 // Updated Zod schemas for tag-based validation with revision and shopping support
 const ProcessedQuerySchema = z.object({

@@ -21,7 +21,7 @@ import {
   cleanupDuplicatePersonalSpaces,
   type Space
 } from '@/lib/knowledge';
-import { KnowledgeEntry } from '@/lib/constants';
+import { KnowledgeEntry } from '@/lib/knowledge/types';
 import ChatInterface from './ChatInterface';
 import KnowledgeHub from './KnowledgeHub';
 import SpaceSwitcher from './SpaceSwitcher';

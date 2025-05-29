@@ -18,69 +18,19 @@ import {
 import { createClient } from '@supabase/supabase-js';
 import { cache, cacheKeys } from './cache';
 import { db } from './firebase'; // Import from existing firebase.ts
-import type { KnowledgeEntry } from './constants';
+import type { 
+  KnowledgeEntry,
+  Account,
+  Space,
+  UserProfile,
+  ShareLink
+} from './knowledge/types';
 
 // Initialize Supabase
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
   process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
 );
-
-export interface Account {
-  id?: string;
-  members: string[];
-  createdAt: Date;
-  settings: {
-    allowNotifications: boolean;
-    timezone: string;
-  };
-}
-
-// New enhanced space management interfaces
-export interface Space {
-  id?: string;
-  name: string;
-  type: 'personal' | 'shared';
-  owner: string;
-  members: string[];
-  icon?: string; // Emoji or icon identifier
-  color?: string; // Theme color
-  settings: SpaceSettings;
-  createdAt: Date;
-  updatedAt?: Date;
-}
-
-export interface SpaceSettings {
-  allowNotifications: boolean;
-  timezone: string;
-  isPublic: boolean; // Whether space can be discovered
-  allowMemberInvites: boolean; // Whether members can invite others
-}
-
-export interface UserProfile {
-  uid: string;
-  personalSpaceId: string; // Auto-created on signup
-  activeSpaceId: string; // Currently selected space
-  spaceMemberships: string[]; // All spaces user belongs to
-  displayName?: string;
-  email?: string;
-  createdAt: Date;
-  updatedAt?: Date;
-}
-
-// Share link interface for space invitations
-export interface ShareLink {
-  id?: string;
-  spaceId: string;
-  token: string; // unique 9-character token (longer than invite codes)
-  createdBy: string; // user who generated link
-  createdAt: Date;
-  expiresAt?: Date; // optional expiration
-  usageCount: number;
-  maxUses?: number; // optional usage limit
-  isActive: boolean;
-  customMessage?: string; // optional personal message
-}
 
 // Helper function to call API routes
 async function callKnowledgeAPI(action: string, data: Record<string, unknown>) {
@@ -1645,4 +1595,13 @@ export async function cleanupDuplicatePersonalSpaces(userId: string): Promise<vo
     console.error('❌ Error cleaning up duplicate personal spaces:', error);
     // Don't throw - this is a cleanup operation and shouldn't break the app
   }
-} 
+}
+
+// Re-export types for backward compatibility during refactoring
+export type { 
+  Account, 
+  Space, 
+  UserProfile, 
+  ShareLink,
+  KnowledgeEntry 
+} from './knowledge/types'; 

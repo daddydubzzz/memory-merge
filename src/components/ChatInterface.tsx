@@ -4,7 +4,7 @@ import React, { useState, useRef, useEffect } from 'react';
 import { Send, MessageCircle, Sparkles } from 'lucide-react';
 import { useAuth } from '@/contexts/AuthContext';
 import { KnowledgeService } from '@/lib/knowledge';
-import type { KnowledgeEntry } from '@/lib/constants';
+import type { KnowledgeEntry } from '@/lib/knowledge/types';
 
 interface Message {
   id: string;

@@ -1,7 +1,7 @@
 import OpenAI from 'openai';
 import { z } from 'zod';
 import { supabase } from './supabase';
-import type { KnowledgeEntry } from './constants';
+import type { KnowledgeEntry } from './knowledge/types';
 
 // Create OpenAI client - this should only be used server-side
 function createOpenAIClient() {

@@ -3,7 +3,7 @@
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { Search, Tag, Clock, User, Archive } from 'lucide-react';
 import { KnowledgeService, getUserDisplayName } from '@/lib/knowledge';
-import type { KnowledgeEntry } from '@/lib/constants';
+import type { KnowledgeEntry } from '@/lib/knowledge/types';
 
 interface KnowledgeHubProps {
   accountId: string;
