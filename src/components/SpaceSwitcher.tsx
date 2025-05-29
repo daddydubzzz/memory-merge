@@ -15,10 +15,9 @@ interface SpaceSwitcherProps {
   currentSpaceId: string | null;
   onSpaceChange: (spaceId: string) => void;
   onCreateSpace: () => void;
-  onJoinSpace?: () => void;
 }
 
-export default function SpaceSwitcher({ currentSpaceId, onSpaceChange, onCreateSpace, onJoinSpace }: SpaceSwitcherProps) {
+export default function SpaceSwitcher({ currentSpaceId, onSpaceChange, onCreateSpace }: SpaceSwitcherProps) {
   const { user } = useAuth();
   const [spaces, setSpaces] = useState<Space[]>([]);
   const [currentSpace, setCurrentSpace] = useState<Space | null>(null);
@@ -200,28 +199,6 @@ export default function SpaceSwitcher({ currentSpaceId, onSpaceChange, onCreateS
                 </p>
               </div>
             </button>
-            
-            {onJoinSpace && (
-              <button
-                onClick={() => {
-                  setIsOpen(false);
-                  onJoinSpace();
-                }}
-                className="w-full flex items-center space-x-3 p-4 hover:bg-gray-100/80 transition-all duration-200 group border-t border-gray-200/30"
-              >
-                <div className="w-8 h-8 bg-gradient-to-r from-blue-500 to-blue-600 rounded-lg flex items-center justify-center text-white shadow-lg">
-                  <Users className="w-4 h-4" />
-                </div>
-                <div className="flex-1 text-left">
-                  <p className="text-sm font-semibold text-gray-800 group-hover:text-gray-900">
-                    Join Space
-                  </p>
-                  <p className="text-xs text-gray-500">
-                    Enter an invite code to join
-                  </p>
-                </div>
-              </button>
-            )}
           </div>
         </div>
       )}

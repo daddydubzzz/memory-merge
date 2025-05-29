@@ -9,14 +9,14 @@ import {
   Archive,
   Plus,
   Menu,
-  Heart
+  Heart,
+  Share2
 } from 'lucide-react';
 import { useAuth } from '@/contexts/AuthContext';
 import { 
   createPersonalSpace, 
   getUserProfile, 
   getUserSpaces, 
-  joinSpaceByInviteCode,
   KnowledgeService, 
   getTagStats,
   type Space,
@@ -27,7 +27,7 @@ import ChatInterface from './ChatInterface';
 import KnowledgeHub from './KnowledgeHub';
 import SpaceSwitcher from './SpaceSwitcher';
 import CreateSpaceModal from './CreateSpaceModal';
-import JoinSpaceModal from './JoinSpaceModal';
+import ShareLinkGenerator from './ShareLinkGenerator';
 
 interface DashboardProps {
   // Remove accountId prop since we'll manage spaces internally
@@ -47,7 +47,7 @@ export default function Dashboard({}: DashboardProps) {
   const [currentSpaceId, setCurrentSpaceId] = useState<string | null>(null);
   const [spaces, setSpaces] = useState<Space[]>([]);
   const [showCreateSpaceModal, setShowCreateSpaceModal] = useState(false);
-  const [showJoinSpaceModal, setShowJoinSpaceModal] = useState(false);
+  const [showShareLinkGenerator, setShowShareLinkGenerator] = useState(false);
   const [isInitializing, setIsInitializing] = useState(true);
   
   // Add ref to prevent duplicate initialization
@@ -74,6 +74,29 @@ export default function Dashboard({}: DashboardProps) {
     { id: 'knowledge', label: 'Knowledge Hub', icon: Archive },
     { id: 'settings', label: 'Settings', icon: Settings }
   ];
+
+  // Prevent body scroll when mobile sidebar is open
+  useEffect(() => {
+    if (sidebarOpen) {
+      // Prevent background scroll
+      document.body.style.overflow = 'hidden';
+      // Prevent touch scrolling on mobile
+      document.body.style.position = 'fixed';
+      document.body.style.width = '100%';
+    } else {
+      // Restore scroll
+      document.body.style.overflow = '';
+      document.body.style.position = '';
+      document.body.style.width = '';
+    }
+
+    // Cleanup on unmount
+    return () => {
+      document.body.style.overflow = '';
+      document.body.style.position = '';
+      document.body.style.width = '';
+    };
+  }, [sidebarOpen]);
 
   // Initialize user and create personal space if needed
   useEffect(() => {
@@ -208,10 +231,6 @@ export default function Dashboard({}: DashboardProps) {
     setShowCreateSpaceModal(true);
   }, []);
 
-  const handleJoinSpace = useCallback(() => {
-    setShowJoinSpaceModal(true);
-  }, []);
-
   const handleSpaceCreated = useCallback(async (spaceId: string) => {
     // Refresh user's spaces and switch to new space
     try {
@@ -219,18 +238,6 @@ export default function Dashboard({}: DashboardProps) {
       setSpaces(userSpaces);
       setCurrentSpaceId(spaceId);
       setShowCreateSpaceModal(false);
-    } catch (error) {
-      console.error('Error refreshing spaces:', error);
-    }
-  }, [user]);
-
-  const handleSpaceJoined = useCallback(async (spaceId: string) => {
-    // Refresh user's spaces and switch to joined space
-    try {
-      const userSpaces = await getUserSpaces(user!.uid);
-      setSpaces(userSpaces);
-      setCurrentSpaceId(spaceId);
-      setShowJoinSpaceModal(false);
     } catch (error) {
       console.error('Error refreshing spaces:', error);
     }
@@ -270,7 +277,7 @@ export default function Dashboard({}: DashboardProps) {
   }
 
   const sidebarContent = (
-    <div className="h-full flex flex-col bg-gradient-to-b from-slate-900 via-gray-900 to-slate-900 text-white relative overflow-hidden">
+    <div className="h-full flex flex-col bg-gradient-to-b from-slate-900 via-gray-900 to-slate-900 text-white relative overflow-hidden lg:overflow-hidden">
       {/* Background decoration */}
       <div className="absolute inset-0 overflow-hidden pointer-events-none">
         <div className="absolute top-0 left-0 w-32 h-32 bg-gradient-to-br from-blue-500/10 to-purple-500/10 rounded-full blur-2xl"></div>
@@ -278,7 +285,7 @@ export default function Dashboard({}: DashboardProps) {
       </div>
 
       {/* Header */}
-      <div className="relative p-6 border-b border-white/10 backdrop-blur-sm">
+      <div className="relative p-6 border-b border-white/10 backdrop-blur-sm flex-shrink-0">
         <div className="flex items-center mb-3">
           <div className="relative">
             <div className="w-8 h-8 bg-gradient-to-r from-pink-500 to-rose-500 rounded-xl flex items-center justify-center shadow-lg shadow-pink-500/25">
@@ -297,17 +304,16 @@ export default function Dashboard({}: DashboardProps) {
       </div>
 
       {/* Space Switcher */}
-      <div className="relative p-6 border-b border-white/10">
+      <div className="relative p-6 border-b border-white/10 flex-shrink-0">
         <SpaceSwitcher
           currentSpaceId={currentSpaceId}
           onSpaceChange={handleSpaceChange}
           onCreateSpace={handleCreateSpace}
-          onJoinSpace={handleJoinSpace}
         />
       </div>
 
-      {/* Navigation */}
-      <nav className="flex-1 p-6 relative">
+      {/* Navigation - Scrollable on mobile */}
+      <nav className="flex-1 p-6 relative overflow-y-auto lg:overflow-visible">
         <div className="space-y-2">
           {navigationItems.map((item) => (
             <button
@@ -383,7 +389,7 @@ export default function Dashboard({}: DashboardProps) {
       </nav>
 
       {/* Footer */}
-      <div className="p-6 border-t border-white/10 relative">
+      <div className="p-6 border-t border-white/10 relative flex-shrink-0">
         <button
           onClick={handleSignOut}
           className="w-full flex items-center px-4 py-3 text-gray-300 hover:text-white hover:bg-white/10 rounded-2xl transition-all duration-200 group border border-transparent hover:border-white/10"
@@ -414,11 +420,13 @@ export default function Dashboard({}: DashboardProps) {
         {/* Mobile sidebar overlay */}
         {sidebarOpen && (
           <div className="lg:hidden fixed inset-0 z-40 flex">
+            {/* Background overlay */}
             <div
               className="fixed inset-0 bg-black/50 backdrop-blur-sm"
               onClick={() => setSidebarOpen(false)}
             />
-            <div className="relative flex w-80 flex-col">
+            {/* Sidebar content - properly scrollable */}
+            <div className="relative w-80 h-full flex flex-col">
               {sidebarContent}
             </div>
           </div>
@@ -444,6 +452,7 @@ export default function Dashboard({}: DashboardProps) {
               user={user}
               spaces={spaces}
               currentSpace={spaces.find(s => s.id === currentSpaceId) || null}
+              onShowShareLinks={() => setShowShareLinkGenerator(true)}
             />
           )}
         </div>
@@ -455,23 +464,26 @@ export default function Dashboard({}: DashboardProps) {
         onClose={() => setShowCreateSpaceModal(false)}
         onSpaceCreated={handleSpaceCreated}
       />
-      <JoinSpaceModal
-        isOpen={showJoinSpaceModal}
-        onClose={() => setShowJoinSpaceModal(false)}
-        onSpaceJoined={handleSpaceJoined}
-      />
+      {currentSpaceId && spaces.find(s => s.id === currentSpaceId) && (
+        <ShareLinkGenerator
+          isOpen={showShareLinkGenerator}
+          onClose={() => setShowShareLinkGenerator(false)}
+          space={spaces.find(s => s.id === currentSpaceId)!}
+        />
+      )}
     </>
   );
 }
 
 // Settings view component
-function SettingsView({ accountId, recentEntries, tagStats, user, spaces, currentSpace }: { 
+function SettingsView({ accountId, recentEntries, tagStats, user, spaces, currentSpace, onShowShareLinks }: { 
   accountId: string; 
   recentEntries: KnowledgeEntry[]; 
   tagStats: Record<string, number>; 
   user: { displayName?: string | null; email?: string | null } | null;
   spaces: Space[];
   currentSpace: Space | null;
+  onShowShareLinks: () => void;
 }) {
   const totalEntries = recentEntries.length;
   const totalTags = Object.keys(tagStats).length;
@@ -547,23 +559,21 @@ function SettingsView({ accountId, recentEntries, tagStats, user, spaces, curren
                       </div>
                     </div>
 
-                    {/* Space ID for sharing (only for shared spaces) */}
-                    {currentSpace.type === 'shared' && currentSpace.inviteCode && (
+                    {/* Share Links (only for shared spaces) */}
+                    {currentSpace.type === 'shared' && (
                       <div>
-                        <label className="block text-sm font-semibold text-gray-700 mb-2">Invite Code</label>
-                        <div className="relative group">
-                          <div className="p-4 bg-gray-50/50 border border-gray-200/50 rounded-2xl text-sm text-gray-800 font-mono text-center text-lg font-bold group-hover:bg-white/80 transition-all duration-200">
-                            {currentSpace.inviteCode}
-                          </div>
+                        <div className="flex items-center justify-between mb-3">
+                          <label className="block text-sm font-semibold text-gray-700">Share Links</label>
                           <button 
-                            onClick={() => navigator.clipboard.writeText(currentSpace.inviteCode!)}
-                            className="absolute right-3 top-1/2 transform -translate-y-1/2 opacity-0 group-hover:opacity-100 transition-opacity bg-blue-500 hover:bg-blue-600 text-white px-3 py-1 rounded-lg text-xs font-medium"
+                            onClick={onShowShareLinks}
+                            className="text-sm bg-gradient-to-r from-blue-600 to-purple-600 text-white px-4 py-2 rounded-lg font-medium hover:from-blue-700 hover:to-purple-700 transition-all duration-200 flex items-center"
                           >
-                            Copy
+                            <Share2 className="w-4 h-4 mr-2" />
+                            Manage Links
                           </button>
                         </div>
-                        <p className="text-xs text-gray-500 mt-2 leading-relaxed">
-                          Share this code with others to invite them to this space
+                        <p className="text-sm text-gray-600">
+                          Create shareable links with custom settings and track usage
                         </p>
                       </div>
                     )}

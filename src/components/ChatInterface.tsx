@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useState, useRef, useEffect } from 'react';
-import { Send, Mic, MicOff, MessageCircle, Sparkles } from 'lucide-react';
+import { Send, MessageCircle, Sparkles } from 'lucide-react';
 import { useAuth } from '@/contexts/AuthContext';
 import { KnowledgeService } from '@/lib/knowledge';
 import type { KnowledgeEntry } from '@/lib/constants';
@@ -25,38 +25,10 @@ export default function ChatInterface({ accountId }: ChatInterfaceProps) {
   const [messages, setMessages] = useState<Message[]>([]);
   const [inputValue, setInputValue] = useState('');
   const [isLoading, setIsLoading] = useState(false);
-  const [isListening, setIsListening] = useState(false);
-  const [recognition, setRecognition] = useState<SpeechRecognition | null>(null);
   
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const knowledgeService = new KnowledgeService(accountId);
-
-  // Initialize speech recognition
-  useEffect(() => {
-    if (typeof window !== 'undefined' && 'webkitSpeechRecognition' in window) {
-      const recognition = new (window as unknown as { webkitSpeechRecognition: new () => SpeechRecognition }).webkitSpeechRecognition();
-      recognition.continuous = false;
-      recognition.interimResults = false;
-      recognition.lang = 'en-US';
-
-      recognition.onresult = (event: SpeechRecognitionEvent) => {
-        const transcript = event.results[0][0].transcript;
-        setInputValue(transcript);
-        setIsListening(false);
-      };
-
-      recognition.onerror = () => {
-        setIsListening(false);
-      };
-
-      recognition.onend = () => {
-        setIsListening(false);
-      };
-
-      setRecognition(recognition);
-    }
-  }, []);
-
+  
   // Auto-scroll to bottom when new messages arrive
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -225,20 +197,6 @@ export default function ChatInterface({ accountId }: ChatInterfaceProps) {
     setIsLoading(false);
   };
 
-  const startListening = () => {
-    if (recognition && !isListening) {
-      setIsListening(true);
-      recognition.start();
-    }
-  };
-
-  const stopListening = () => {
-    if (recognition && isListening) {
-      recognition.stop();
-      setIsListening(false);
-    }
-  };
-
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-50 via-blue-50 to-indigo-100 relative overflow-hidden">
       {/* Background decoration */}
@@ -348,16 +306,6 @@ export default function ChatInterface({ accountId }: ChatInterfaceProps) {
           {/* Mobile-first responsive padding */}
           <div className="p-4 sm:p-6">
             <div className="max-w-4xl mx-auto">
-              {/* Enhanced listening indicator */}
-              {isListening && (
-                <div className="mb-4 text-center">
-                  <div className="inline-flex items-center bg-red-50/80 backdrop-blur-sm border border-red-200/50 rounded-2xl px-4 py-3">
-                    <div className="w-3 h-3 bg-red-500 rounded-full mr-3 animate-pulse"></div>
-                    <span className="text-sm font-medium text-red-700">Listening... Speak now</span>
-                  </div>
-                </div>
-              )}
-
               <div className="flex flex-col sm:flex-row space-y-3 sm:space-y-0 sm:space-x-3">
                 {/* Enhanced input area */}
                 <div className="flex-1 relative group">
@@ -390,30 +338,17 @@ export default function ChatInterface({ accountId }: ChatInterfaceProps) {
                   </div>
                 </div>
                 
-                {/* Action buttons - Mobile optimized layout */}
-                <div className="flex space-x-3 sm:flex-col sm:space-x-0 sm:space-y-3 justify-center sm:justify-start">
-                  {/* Enhanced voice button */}
-                  {recognition && (
-                    <button
-                      onClick={isListening ? stopListening : startListening}
-                      className={`flex-1 sm:flex-none px-5 py-4 rounded-2xl transition-all duration-200 font-medium ${
-                        isListening 
-                          ? 'bg-gradient-to-r from-red-500 to-pink-500 text-white shadow-lg shadow-red-500/25 hover:shadow-xl active:scale-95' 
-                          : 'bg-white/80 backdrop-blur-sm text-gray-600 hover:text-gray-800 border border-gray-200/50 hover:bg-white hover:shadow-lg active:scale-95'
-                      }`}
-                      disabled={isLoading}
-                      title={isListening ? 'Stop listening' : 'Start voice input'}
-                    >
-                      {isListening ? <MicOff className="w-5 h-5 mx-auto" /> : <Mic className="w-5 h-5 mx-auto" />}
-                    </button>
-                  )}
-                  
-                  {/* Enhanced send button */}
+                {/* Send button - Mobile optimized */}
+                <div className="flex justify-end">
                   <button
                     onClick={() => handleSendMessage(inputValue)}
                     disabled={!inputValue.trim() || isLoading}
-                    className="flex-1 sm:flex-none px-6 py-4 bg-gradient-to-r from-blue-600 to-purple-600 hover:from-blue-700 hover:to-purple-700 text-white rounded-2xl font-semibold disabled:opacity-50 disabled:cursor-not-allowed transition-all duration-200 shadow-lg shadow-blue-500/25 hover:shadow-xl active:scale-95 min-h-[3.5rem] sm:min-h-[2.75rem] flex items-center justify-center"
+                    className="px-6 py-4 bg-gradient-to-r from-blue-600 to-purple-600 hover:from-blue-700 hover:to-purple-700 text-white rounded-2xl font-semibold disabled:opacity-50 disabled:cursor-not-allowed transition-all duration-200 shadow-lg shadow-blue-500/25 hover:shadow-xl active:scale-95 min-h-[3.5rem] sm:min-h-[2.75rem] flex items-center justify-center touch-manipulation select-none"
                     title="Send message"
+                    style={{ 
+                      WebkitTapHighlightColor: 'transparent',
+                      touchAction: 'manipulation'
+                    }}
                   >
                     <Send className="w-5 h-5" />
                   </button>
