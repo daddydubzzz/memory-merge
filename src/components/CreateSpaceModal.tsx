@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useState } from 'react';
-import { X, Copy, CheckCircle } from 'lucide-react';
+import { X, CheckCircle } from 'lucide-react';
 import { useAuth } from '@/contexts/AuthContext';
 import { createSharedSpace } from '@/lib/knowledge';
 
@@ -24,14 +24,12 @@ const emojiOptions = ['👥', '💼', '📚', '🚀', '❤️', '🧠', '🎯', 
 
 export default function CreateSpaceModal({ isOpen, onClose, onSpaceCreated }: CreateSpaceModalProps) {
   const { user } = useAuth();
-  const [step, setStep] = useState<'customize' | 'created'>('customize');
+  const [step, setStep] = useState<'customize' | 'success'>('customize');
   const [spaceName, setSpaceName] = useState('');
   const [spaceIcon, setSpaceIcon] = useState('👥');
   const [spaceColor, setSpaceColor] = useState('purple');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
-  const [inviteCode, setInviteCode] = useState('');
-  const [copied, setCopied] = useState(false);
 
   const resetState = () => {
     setStep('customize');
@@ -39,8 +37,7 @@ export default function CreateSpaceModal({ isOpen, onClose, onSpaceCreated }: Cr
     setSpaceIcon('👥');
     setSpaceColor('purple');
     setError('');
-    setInviteCode('');
-    setCopied(false);
+    setLoading(false);
   };
 
   const handleClose = () => {
@@ -58,26 +55,25 @@ export default function CreateSpaceModal({ isOpen, onClose, onSpaceCreated }: Cr
     setError('');
 
     try {
-      const result = await createSharedSpace(user.uid, spaceName.trim(), spaceIcon, spaceColor);
-      setInviteCode(result.inviteCode);
-      setStep('created');
-      onSpaceCreated(result.spaceId);
+      const spaceId = await createSharedSpace(
+        user.uid, 
+        spaceName.trim(), 
+        spaceIcon, 
+        spaceColor
+      );
+      
+      setStep('success');
+      onSpaceCreated(spaceId);
     } catch (error) {
       console.error('Error creating space:', error);
-      setError('Failed to create space. Please try again.');
+      if (error instanceof Error) {
+        setError(error.message);
+      } else {
+        setError('Failed to create space. Please try again.');
+      }
     }
 
     setLoading(false);
-  };
-
-  const handleCopyInviteCode = async () => {
-    try {
-      await navigator.clipboard.writeText(inviteCode);
-      setCopied(true);
-      setTimeout(() => setCopied(false), 2000);
-    } catch (error) {
-      console.error('Failed to copy invite code:', error);
-    }
   };
 
   if (!isOpen) return null;
@@ -90,11 +86,11 @@ export default function CreateSpaceModal({ isOpen, onClose, onSpaceCreated }: Cr
           <div>
             <h2 className="text-2xl font-bold bg-gradient-to-r from-gray-900 to-purple-900 bg-clip-text text-transparent">
               {step === 'customize' && 'Create New Space'}
-              {step === 'created' && 'Space Created! 🎉'}
+              {step === 'success' && 'Space Created! 🎉'}
             </h2>
             <p className="text-gray-600 mt-1">
               {step === 'customize' && 'Personalize your shared knowledge space'}
-              {step === 'created' && 'Your space is ready for collaboration'}
+              {step === 'success' && 'Your space is ready for collaboration'}
             </p>
           </div>
           <button
@@ -205,7 +201,7 @@ export default function CreateSpaceModal({ isOpen, onClose, onSpaceCreated }: Cr
             </div>
           )}
 
-          {step === 'created' && (
+          {step === 'success' && (
             <div className="text-center space-y-6">
               {/* Success Icon */}
               <div className="flex justify-center">
@@ -224,29 +220,6 @@ export default function CreateSpaceModal({ isOpen, onClose, onSpaceCreated }: Cr
                     <h3 className="text-xl font-bold text-gray-800">{spaceName}</h3>
                     <p className="text-gray-600">Shared space • Ready for collaboration</p>
                   </div>
-                </div>
-
-                {/* Invite Code */}
-                <div className="bg-white rounded-xl p-4 border border-gray-200">
-                  <label className="block text-sm font-semibold text-gray-700 mb-2">Invite Code</label>
-                  <div className="flex items-center space-x-2">
-                    <code className="flex-1 px-3 py-2 bg-gray-50 rounded-lg font-mono text-lg font-bold text-center text-gray-800 border">
-                      {inviteCode}
-                    </code>
-                    <button
-                      onClick={handleCopyInviteCode}
-                      className={`px-4 py-2 rounded-lg font-medium transition-all duration-200 ${
-                        copied
-                          ? 'bg-green-100 text-green-700 border border-green-200'
-                          : 'bg-blue-100 text-blue-700 border border-blue-200 hover:bg-blue-200'
-                      }`}
-                    >
-                      {copied ? 'Copied!' : 'Copy'}
-                    </button>
-                  </div>
-                  <p className="text-xs text-gray-500 mt-2 text-center">
-                    Share this code with others to invite them to your space
-                  </p>
                 </div>
               </div>
 

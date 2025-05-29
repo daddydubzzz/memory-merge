@@ -1,7 +1,7 @@
 'use client';
 
 import React from 'react';
-import { AuthProvider, useAuth } from '@/contexts/AuthContext';
+import { useAuth } from '@/contexts/AuthContext';
 import AuthForm from '@/components/AuthForm';
 import Dashboard from '@/components/Dashboard';
 
@@ -30,9 +30,5 @@ function AppContent() {
 }
 
 export default function Home() {
-  return (
-    <AuthProvider>
-      <AppContent />
-    </AuthProvider>
-  );
+  return <AppContent />;
 }

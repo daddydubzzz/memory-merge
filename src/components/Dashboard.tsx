@@ -7,7 +7,6 @@ import {
   LogOut, 
   Users, 
   Archive,
-  Plus,
   Menu,
   Heart,
   Share2
@@ -19,8 +18,7 @@ import {
   getUserSpaces, 
   KnowledgeService, 
   getTagStats,
-  type Space,
-  type UserProfile 
+  type Space
 } from '@/lib/knowledge';
 import { KnowledgeEntry } from '@/lib/constants';
 import ChatInterface from './ChatInterface';
@@ -29,9 +27,8 @@ import SpaceSwitcher from './SpaceSwitcher';
 import CreateSpaceModal from './CreateSpaceModal';
 import ShareLinkGenerator from './ShareLinkGenerator';
 
-interface DashboardProps {
-  // Remove accountId prop since we'll manage spaces internally
-}
+// Remove accountId prop since we'll manage spaces internally  
+type DashboardProps = Record<string, never>;
 
 export default function Dashboard({}: DashboardProps) {
   const { user, signout } = useAuth();
@@ -43,7 +40,6 @@ export default function Dashboard({}: DashboardProps) {
   const [selectedTag, setSelectedTag] = useState<string | null>(null);
   
   // New space management state
-  const [userProfile, setUserProfile] = useState<UserProfile | null>(null);
   const [currentSpaceId, setCurrentSpaceId] = useState<string | null>(null);
   const [spaces, setSpaces] = useState<Space[]>([]);
   const [showCreateSpaceModal, setShowCreateSpaceModal] = useState(false);
@@ -141,7 +137,6 @@ export default function Dashboard({}: DashboardProps) {
         }
 
         if (profile) {
-          setUserProfile(profile);
           setCurrentSpaceId(profile.activeSpaceId);
           
           // Load user's spaces
@@ -446,7 +441,6 @@ export default function Dashboard({}: DashboardProps) {
           )}
           {activeView === 'settings' && currentSpaceId && (
             <SettingsView 
-              accountId={currentSpaceId} 
               recentEntries={recentEntries} 
               tagStats={tagStats} 
               user={user}
@@ -476,8 +470,7 @@ export default function Dashboard({}: DashboardProps) {
 }
 
 // Settings view component
-function SettingsView({ accountId, recentEntries, tagStats, user, spaces, currentSpace, onShowShareLinks }: { 
-  accountId: string; 
+function SettingsView({ recentEntries, tagStats, user, spaces, currentSpace, onShowShareLinks }: { 
   recentEntries: KnowledgeEntry[]; 
   tagStats: Record<string, number>; 
   user: { displayName?: string | null; email?: string | null } | null;

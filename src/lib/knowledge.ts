@@ -1364,12 +1364,17 @@ export async function createShareLink(
       customMessage: options.customMessage,
     };
 
+    // Filter out undefined values for Firestore compatibility
+    const cleanShareLink = Object.fromEntries(
+      Object.entries({
+        ...shareLink,
+        createdAt: serverTimestamp(),
+        expiresAt: expiresAt || null,
+      }).filter(([, value]) => value !== undefined)
+    );
+
     // Store in Firestore
-    const shareLinkRef = await addDoc(collection(db, 'shareLinks'), {
-      ...shareLink,
-      createdAt: serverTimestamp(),
-      expiresAt: expiresAt ? expiresAt : null,
-    });
+    const shareLinkRef = await addDoc(collection(db, 'shareLinks'), cleanShareLink);
 
     const finalShareLink = { ...shareLink, id: shareLinkRef.id };
     

@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useState, useEffect } from 'react';
-import { Share2, Copy, CheckCircle, ExternalLink, Trash2, Plus, Clock, Users, X } from 'lucide-react';
+import { Share2, Copy, CheckCircle, Trash2, Plus, Clock, Users, X } from 'lucide-react';
 import { useAuth } from '@/contexts/AuthContext';
 import { 
   createShareLink, 
@@ -32,23 +32,23 @@ export default function ShareLinkGenerator({ space, isOpen, onClose }: ShareLink
 
   // Load existing share links
   useEffect(() => {
+    const loadShareLinks = async () => {
+      if (!space.id || !user) return;
+      
+      setLoading(true);
+      try {
+        const links = await getSpaceShareLinks(space.id, user.uid);
+        setShareLinks(links);
+      } catch (error) {
+        console.error('Error loading share links:', error);
+      }
+      setLoading(false);
+    };
+
     if (isOpen && space.id && user) {
       loadShareLinks();
     }
   }, [isOpen, space.id, user]);
-
-  const loadShareLinks = async () => {
-    if (!space.id || !user) return;
-    
-    setLoading(true);
-    try {
-      const links = await getSpaceShareLinks(space.id, user.uid);
-      setShareLinks(links);
-    } catch (error) {
-      console.error('Error loading share links:', error);
-    }
-    setLoading(false);
-  };
 
   const handleCreateShareLink = async () => {
     if (!space.id || !user) return;
@@ -139,7 +139,7 @@ export default function ShareLinkGenerator({ space, isOpen, onClose }: ShareLink
                 Share Links
               </h2>
               <p className="text-gray-600 mt-1">
-                Create and manage invite links for "{space.name}"
+                Create and manage invite links for &quot;{space.name}&quot;
               </p>
             </div>
           </div>
@@ -299,7 +299,7 @@ export default function ShareLinkGenerator({ space, isOpen, onClose }: ShareLink
 
                       {link.customMessage && (
                         <div className="bg-blue-50/50 rounded-lg p-3 mb-3">
-                          <p className="text-sm text-blue-800 italic">"{link.customMessage}"</p>
+                          <p className="text-sm text-blue-800 italic">&quot;{link.customMessage}&quot;</p>
                         </div>
                       )}
 

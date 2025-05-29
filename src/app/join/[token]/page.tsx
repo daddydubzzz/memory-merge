@@ -1,8 +1,8 @@
 'use client';
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { useParams, useRouter } from 'next/navigation';
-import { Users, Heart, AlertCircle, CheckCircle, Loader2 } from 'lucide-react';
+import { Users, Heart, AlertCircle, CheckCircle } from 'lucide-react';
 import { useAuth } from '@/contexts/AuthContext';
 import { 
   validateShareLink, 
@@ -26,47 +26,30 @@ export default function JoinPage() {
 
   // Validate the share link on load
   useEffect(() => {
+    const validateToken = async () => {
+      setLoading(true);
+      try {
+        const validation = await validateShareLink(token);
+        
+        if (validation.valid && validation.shareLink && validation.space) {
+          setShareLink(validation.shareLink);
+          setSpace(validation.space);
+        } else {
+          setError(validation.error || 'Invalid share link');
+        }
+      } catch (error) {
+        console.error('Error validating share link:', error);
+        setError('Failed to validate share link');
+      }
+      setLoading(false);
+    };
+
     if (token) {
       validateToken();
     }
   }, [token]);
 
-  // Handle joining after user authenticates
-  useEffect(() => {
-    if (user && shareLink && space && !success && !joining) {
-      handleJoinSpace();
-    }
-  }, [user, shareLink, space, success, joining]);
-
-  const validateToken = async () => {
-    setLoading(true);
-    try {
-      const validation = await validateShareLink(token);
-      
-      if (validation.valid && validation.shareLink && validation.space) {
-        setShareLink(validation.shareLink);
-        setSpace(validation.space);
-      } else {
-        setError(validation.error || 'Invalid share link');
-      }
-    } catch (error) {
-      console.error('Error validating share link:', error);
-      setError('Failed to validate share link');
-    }
-    setLoading(false);
-  };
-
-  const handleSignIn = async () => {
-    try {
-      await signInWithGoogle();
-      // The useEffect will handle joining after authentication
-    } catch (error) {
-      console.error('Error signing in:', error);
-      setError('Failed to sign in. Please try again.');
-    }
-  };
-
-  const handleJoinSpace = async () => {
+  const handleJoinSpace = useCallback(async () => {
     if (!user || !token) return;
 
     setJoining(true);
@@ -87,6 +70,23 @@ export default function JoinPage() {
       setError('Failed to join space. Please try again.');
     }
     setJoining(false);
+  }, [user, token, router]);
+
+  // Handle joining after user authenticates
+  useEffect(() => {
+    if (user && shareLink && space && !success && !joining) {
+      handleJoinSpace();
+    }
+  }, [user, shareLink, space, success, joining, handleJoinSpace]);
+
+  const handleSignIn = async () => {
+    try {
+      await signInWithGoogle();
+      // The useEffect will handle joining after authentication
+    } catch (error) {
+      console.error('Error signing in:', error);
+      setError('Failed to sign in. Please try again.');
+    }
   };
 
   const getSpaceColor = (space: Space) => {
@@ -142,7 +142,7 @@ export default function JoinPage() {
           </div>
           <h1 className="text-2xl font-bold text-gray-800 mb-4">Welcome to {space?.name}! 🎉</h1>
           <p className="text-gray-600 mb-6">
-            You've successfully joined the space. Redirecting you now...
+            You&apos;ve successfully joined the space. Redirecting you now...
           </p>
           <div className="w-8 h-8 border-2 border-blue-500/30 border-t-blue-500 rounded-full animate-spin mx-auto"></div>
         </div>
@@ -176,7 +176,7 @@ export default function JoinPage() {
               <Heart className="w-8 h-8 text-white" fill="currentColor" />
             </div>
             <h1 className="text-3xl font-bold bg-gradient-to-r from-gray-900 via-purple-900 to-pink-900 bg-clip-text text-transparent mb-2">
-              You're Invited!
+              You&apos;re Invited!
             </h1>
             <p className="text-gray-600 text-lg">
               Join a shared knowledge space
@@ -200,7 +200,7 @@ export default function JoinPage() {
 
             {shareLink.customMessage && (
               <div className="bg-blue-50/50 rounded-lg p-4 border border-blue-200/30">
-                <p className="text-blue-800 italic">"{shareLink.customMessage}"</p>
+                <p className="text-blue-800 italic">&quot;{shareLink.customMessage}&quot;</p>
               </div>
             )}
           </div>
@@ -225,7 +225,7 @@ export default function JoinPage() {
                   Sign in with Google
                 </button>
                 <p className="text-xs text-gray-500 mt-3">
-                  New to Memory Merge? We'll create your account automatically
+                  New to Memory Merge? We&apos;ll create your account automatically
                 </p>
               </div>
             ) : joining ? (
@@ -246,7 +246,7 @@ export default function JoinPage() {
           {/* Footer */}
           <div className="text-center mt-8 pt-6 border-t border-gray-200/50">
             <p className="text-xs text-gray-500">
-              By joining, you'll get access to shared knowledge and conversations
+              By joining, you&apos;ll get access to shared knowledge and conversations
             </p>
           </div>
         </div>

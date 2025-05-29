@@ -1,11 +1,10 @@
 'use client';
 
 import React, { useState, useEffect, useRef } from 'react';
-import { ChevronDown, Plus, Users, Brain, Settings } from 'lucide-react';
+import { ChevronDown, Plus, Users, Brain } from 'lucide-react';
 import { useAuth } from '@/contexts/AuthContext';
 import { 
   getUserSpaces, 
-  getUserProfile, 
   updateActiveSpace, 
   getSpaceById,
   type Space 
