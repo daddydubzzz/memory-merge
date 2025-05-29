@@ -1076,14 +1076,16 @@ export async function getUserDisplayName(userId: string): Promise<string> {
 // Create a personal space for a user (called during signup)
 export async function createPersonalSpace(userId: string, userDisplayName?: string, userEmail?: string): Promise<string> {
   try {
-    // First check if user already has a personal space
+    console.log('🏗️ createPersonalSpace called for user:', userId);
+    
+    // First check if user already has a personal space (double-check)
     const existingProfile = await getUserProfile(userId);
     if (existingProfile) {
       console.log('⚠️ User already has a profile with personal space:', existingProfile.personalSpaceId);
       return existingProfile.personalSpaceId;
     }
 
-    // Check if user already has any personal spaces
+    // Check if user already has any personal spaces (direct space query)
     const userSpaces = await getUserSpaces(userId);
     const existingPersonalSpace = userSpaces.find(space => space.type === 'personal');
     if (existingPersonalSpace) {
@@ -1115,10 +1117,28 @@ export async function createPersonalSpace(userId: string, userDisplayName?: stri
       createdAt: serverTimestamp(),
     });
 
-    console.log('✅ Personal space created:', spaceRef.id);
+    console.log('✅ Personal space created with ID:', spaceRef.id);
 
-    // Create or update user profile
-    await createOrUpdateUserProfile(userId, spaceRef.id, userDisplayName, userEmail);
+    // Create or update user profile - with retry logic in case of race conditions
+    let profileCreated = false;
+    let attempts = 0;
+    const maxAttempts = 3;
+    
+    while (!profileCreated && attempts < maxAttempts) {
+      try {
+        await createOrUpdateUserProfile(userId, spaceRef.id, userDisplayName, userEmail);
+        profileCreated = true;
+        console.log('✅ User profile created/updated successfully');
+      } catch (profileError) {
+        attempts++;
+        console.warn(`⚠️ Profile creation attempt ${attempts} failed:`, profileError);
+        if (attempts < maxAttempts) {
+          await new Promise(resolve => setTimeout(resolve, 1000)); // Wait 1 second before retry
+        } else {
+          throw profileError;
+        }
+      }
+    }
 
     return spaceRef.id;
   } catch (error) {
@@ -1586,5 +1606,43 @@ export async function deactivateShareLink(shareLinkId: string, userId: string): 
   } catch (error) {
     console.error('Error deactivating share link:', error);
     return false;
+  }
+}
+
+// Helper function to clean up duplicate personal spaces (for users who already experienced the bug)
+export async function cleanupDuplicatePersonalSpaces(userId: string): Promise<void> {
+  try {
+    console.log('🧹 Cleaning up duplicate personal spaces for user:', userId);
+    
+    // Get all user's spaces
+    const userSpaces = await getUserSpaces(userId);
+    const personalSpaces = userSpaces.filter(space => space.type === 'personal');
+    
+    if (personalSpaces.length <= 1) {
+      console.log('✅ No duplicate personal spaces found');
+      return;
+    }
+    
+    console.log(`⚠️ Found ${personalSpaces.length} personal spaces, keeping the first one`);
+    
+    // Keep the first personal space (usually the oldest)
+    const keepSpace = personalSpaces[0];
+    const duplicateSpaces = personalSpaces.slice(1);
+    
+    // Update user profile to point to the kept space
+    await createOrUpdateUserProfile(userId, keepSpace.id!, undefined, undefined);
+    
+    // Delete duplicate spaces
+    for (const duplicateSpace of duplicateSpaces) {
+      if (duplicateSpace.id) {
+        console.log(`🗑️ Deleting duplicate personal space: ${duplicateSpace.id}`);
+        await deleteDoc(doc(db, 'spaces', duplicateSpace.id));
+      }
+    }
+    
+    console.log(`✅ Cleaned up ${duplicateSpaces.length} duplicate personal spaces`);
+  } catch (error) {
+    console.error('❌ Error cleaning up duplicate personal spaces:', error);
+    // Don't throw - this is a cleanup operation and shouldn't break the app
   }
 } 

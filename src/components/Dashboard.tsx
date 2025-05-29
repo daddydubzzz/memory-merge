@@ -18,6 +18,7 @@ import {
   getUserSpaces, 
   KnowledgeService, 
   getTagStats,
+  cleanupDuplicatePersonalSpaces,
   type Space
 } from '@/lib/knowledge';
 import { KnowledgeEntry } from '@/lib/constants';
@@ -44,7 +45,8 @@ export default function Dashboard({}: DashboardProps) {
   const [spaces, setSpaces] = useState<Space[]>([]);
   const [showCreateSpaceModal, setShowCreateSpaceModal] = useState(false);
   const [showShareLinkGenerator, setShowShareLinkGenerator] = useState(false);
-  const [isInitializing, setIsInitializing] = useState(true);
+  const [isInitializing, setIsInitializing] = useState(false);
+  const [initializationError, setInitializationError] = useState<string | null>(null);
   
   // Add ref to prevent duplicate initialization
   const initializationRef = useRef(false);
@@ -97,13 +99,16 @@ export default function Dashboard({}: DashboardProps) {
   // Initialize user and create personal space if needed
   useEffect(() => {
     if (!user) {
-      // Reset when user logs out
       initializationRef.current = false;
       currentUserRef.current = null;
+      setSpaces([]);
+      setCurrentSpaceId(null);
+      setIsInitializing(false);
+      setInitializationError(null);
       return;
     }
 
-    // Prevent duplicate initialization for the same user
+    // Skip if already initialized for this user
     if (initializationRef.current && currentUserRef.current === user.uid) {
       return;
     }
@@ -113,25 +118,41 @@ export default function Dashboard({}: DashboardProps) {
       initializationRef.current = true;
       currentUserRef.current = user.uid;
       setIsInitializing(true);
+      setInitializationError(null);
       
       try {
         console.log('🔄 Initializing user:', user.uid);
+        
+        // Add a small delay to ensure AuthContext has finished its work
+        await new Promise(resolve => setTimeout(resolve, 500));
         
         // Get user profile
         let profile = await getUserProfile(user.uid);
         console.log('📋 User profile:', profile ? 'found' : 'not found');
         
+        // Only create personal space if no profile exists at all
+        // The AuthContext should have already handled this for new signups
         if (!profile) {
-          console.log('🏗️ Creating personal space for new user...');
-          const personalSpaceId = await createPersonalSpace(
-            user.uid, 
-            user.displayName || undefined, 
-            user.email || undefined
-          );
+          console.log('⚠️ No user profile found after AuthContext processing - this might be an error case');
+          console.log('🏗️ Creating personal space as fallback...');
           
-          // Get the updated profile
-          profile = await getUserProfile(user.uid);
-          console.log('✅ Personal space created:', personalSpaceId);
+          try {
+            const personalSpaceId = await createPersonalSpace(
+              user.uid, 
+              user.displayName || undefined, 
+              user.email || undefined
+            );
+            
+            // Get the updated profile
+            profile = await getUserProfile(user.uid);
+            console.log('✅ Fallback personal space created:', personalSpaceId);
+          } catch (spaceError) {
+            console.error('❌ Failed to create fallback personal space:', spaceError);
+            setInitializationError('Failed to create your personal space. Please try refreshing the page.');
+            setIsInitializing(false);
+            setLoading(false);
+            return;
+          }
         } else {
           console.log('✅ Using existing user profile');
         }
@@ -140,12 +161,38 @@ export default function Dashboard({}: DashboardProps) {
           setCurrentSpaceId(profile.activeSpaceId);
           
           // Load user's spaces
-          const userSpaces = await getUserSpaces(user.uid);
-          setSpaces(userSpaces);
-          console.log('📚 Loaded spaces:', userSpaces.length);
+          try {
+            const userSpaces = await getUserSpaces(user.uid);
+            setSpaces(userSpaces);
+            console.log('📚 Loaded spaces:', userSpaces.length);
+            
+            // Check for and clean up duplicate personal spaces
+            await cleanupDuplicatePersonalSpaces(user.uid);
+            
+            // Reload spaces after cleanup in case duplicates were removed
+            const cleanedSpaces = await getUserSpaces(user.uid);
+            setSpaces(cleanedSpaces);
+            
+            // Double-check that the active space exists in the user's spaces
+            if (!cleanedSpaces.find(s => s.id === profile.activeSpaceId)) {
+              console.warn('⚠️ Active space not found in user spaces, using first available space');
+              if (cleanedSpaces.length > 0) {
+                setCurrentSpaceId(cleanedSpaces[0].id!);
+              }
+            }
+          } catch (spacesError) {
+            console.error('❌ Failed to load user spaces:', spacesError);
+            setInitializationError('Failed to load your spaces. Please try refreshing the page.');
+            setIsInitializing(false);
+            setLoading(false);
+            return;
+          }
+        } else {
+          setInitializationError('Failed to set up your account. Please try refreshing the page.');
         }
       } catch (error) {
         console.error('❌ Error initializing user:', error);
+        setInitializationError('Something went wrong setting up your account. Please try refreshing the page.');
         // Reset initialization flag on error so it can be retried
         initializationRef.current = false;
       }
@@ -238,6 +285,18 @@ export default function Dashboard({}: DashboardProps) {
     }
   }, [user]);
 
+  const retryInitialization = () => {
+    initializationRef.current = false;
+    setInitializationError(null);
+    setLoading(true);
+    // The useEffect will trigger again when we change the ref
+    if (user) {
+      // Force re-initialization
+      initializationRef.current = false;
+      currentUserRef.current = null;
+    }
+  };
+
   // Show loading screen during initialization
   if (isInitializing || loading) {
     return (
@@ -253,19 +312,63 @@ export default function Dashboard({}: DashboardProps) {
     );
   }
 
+  // Show error screen if initialization failed
+  if (initializationError) {
+    return (
+      <div className="min-h-screen bg-gradient-to-br from-slate-50 via-blue-50 to-indigo-100 flex items-center justify-center p-4">
+        <div className="bg-white/90 backdrop-blur-xl rounded-3xl shadow-2xl border border-white/20 p-8 max-w-lg w-full text-center">
+          <div className="w-16 h-16 bg-gradient-to-r from-red-500 to-pink-500 rounded-full flex items-center justify-center mx-auto mb-6">
+            <svg className="w-8 h-8 text-white" fill="currentColor" viewBox="0 0 20 20">
+              <path fillRule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7 4a1 1 0 11-2 0 1 1 0 012 0zm-1-9a1 1 0 00-1 1v4a1 1 0 102 0V6a1 1 0 00-1-1z" clipRule="evenodd" />
+            </svg>
+          </div>
+          <h2 className="text-2xl font-bold text-gray-800 mb-4">Setup Failed</h2>
+          <p className="text-gray-600 mb-6">{initializationError}</p>
+          <div className="space-y-3">
+            <button
+              onClick={retryInitialization}
+              className="w-full px-6 py-3 bg-gradient-to-r from-blue-600 to-purple-600 text-white rounded-xl font-semibold hover:from-blue-700 hover:to-purple-700 transition-all duration-200"
+            >
+              Try Again
+            </button>
+            <button
+              onClick={() => window.location.reload()}
+              className="w-full px-6 py-3 bg-gray-100 text-gray-700 rounded-xl font-medium hover:bg-gray-200 transition-colors"
+            >
+              Refresh Page
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   // If no current space (shouldn't happen with new system, but fallback)
   if (!currentSpaceId) {
     return (
-      <div className="min-h-screen bg-gradient-to-br from-slate-50 via-blue-50 to-indigo-100 flex items-center justify-center">
-        <div className="text-center">
-          <h2 className="text-2xl font-bold text-gray-800 mb-2">No space available</h2>
-          <p className="text-gray-600 mb-4">Something went wrong. Please refresh the page.</p>
-          <button
-            onClick={() => window.location.reload()}
-            className="px-6 py-3 bg-blue-600 text-white rounded-xl hover:bg-blue-700 transition-colors"
-          >
-            Refresh Page
-          </button>
+      <div className="min-h-screen bg-gradient-to-br from-slate-50 via-blue-50 to-indigo-100 flex items-center justify-center p-4">
+        <div className="bg-white/90 backdrop-blur-xl rounded-3xl shadow-2xl border border-white/20 p-8 max-w-lg w-full text-center">
+          <div className="w-16 h-16 bg-gradient-to-r from-orange-500 to-red-500 rounded-full flex items-center justify-center mx-auto mb-6">
+            <svg className="w-8 h-8 text-white" fill="currentColor" viewBox="0 0 20 20">
+              <path fillRule="evenodd" d="M8.257 3.099c.765-1.36 2.722-1.36 3.486 0l5.58 9.92c.75 1.334-.213 2.98-1.742 2.98H4.42c-1.53 0-2.493-1.646-1.743-2.98l5.58-9.92zM11 13a1 1 0 11-2 0 1 1 0 012 0zm-1-8a1 1 0 00-1 1v3a1 1 0 002 0V6a1 1 0 00-1-1z" clipRule="evenodd" />
+            </svg>
+          </div>
+          <h2 className="text-2xl font-bold text-gray-800 mb-4">No Space Available</h2>
+          <p className="text-gray-600 mb-6">Your account setup is incomplete. Let&apos;s fix this.</p>
+          <div className="space-y-3">
+            <button
+              onClick={retryInitialization}
+              className="w-full px-6 py-3 bg-gradient-to-r from-blue-600 to-purple-600 text-white rounded-xl font-semibold hover:from-blue-700 hover:to-purple-700 transition-all duration-200"
+            >
+              Complete Setup
+            </button>
+            <button
+              onClick={() => window.location.reload()}
+              className="w-full px-6 py-3 bg-gray-100 text-gray-700 rounded-xl font-medium hover:bg-gray-200 transition-colors"
+            >
+              Refresh Page
+            </button>
+          </div>
         </div>
       </div>
     );
