@@ -56,8 +56,9 @@ NEXT_PUBLIC_FIREBASE_MEASUREMENT_ID=your_measurement_id
 # OpenAI Configuration
 OPENAI_API_KEY=your_openai_api_key
 
-# Base URL for share links (update with your actual domain in production)
-NEXT_PUBLIC_BASE_URL=http://localhost:3000
+# Base URL for share links (automatically detected in production)
+# Set this to your production domain if needed, otherwise it will auto-detect
+NEXT_PUBLIC_BASE_URL=https://memory-merge.vercel.app
 ```
 
 ### 3. Firebase Setup

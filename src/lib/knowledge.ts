@@ -1379,7 +1379,29 @@ export async function createShareLink(
     const finalShareLink = { ...shareLink, id: shareLinkRef.id };
     
     // Generate share URL
-    const baseUrl = process.env.NEXT_PUBLIC_BASE_URL || 'http://localhost:3000';
+    const getBaseUrl = () => {
+      // In browser environment, we can use window.location
+      if (typeof window !== 'undefined') {
+        return `${window.location.protocol}//${window.location.host}`;
+      }
+      
+      // In server environment, check environment variables
+      const envUrl = process.env.NEXT_PUBLIC_BASE_URL;
+      if (envUrl) {
+        return envUrl;
+      }
+      
+      // Check Vercel environment
+      const vercelUrl = process.env.VERCEL_URL;
+      if (vercelUrl) {
+        return `https://${vercelUrl}`;
+      }
+      
+      // Default fallback for development
+      return 'http://localhost:3000';
+    };
+    
+    const baseUrl = getBaseUrl();
     const shareUrl = `${baseUrl}/join/${token}`;
 
     console.log('✅ Share link created:', { token, shareUrl, spaceId });

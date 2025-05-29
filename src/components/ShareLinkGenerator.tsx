@@ -119,8 +119,25 @@ export default function ShareLinkGenerator({ space, isOpen, onClose }: ShareLink
   };
 
   const getShareUrl = (token: string) => {
-    const baseUrl = process.env.NEXT_PUBLIC_BASE_URL || 'http://localhost:3000';
-    return `${baseUrl}/join/${token}`;
+    // In browser environment, we can use window.location
+    if (typeof window !== 'undefined') {
+      return `${window.location.protocol}//${window.location.host}/join/${token}`;
+    }
+    
+    // In server environment, check environment variables
+    const envUrl = process.env.NEXT_PUBLIC_BASE_URL;
+    if (envUrl) {
+      return `${envUrl}/join/${token}`;
+    }
+    
+    // Check Vercel environment
+    const vercelUrl = process.env.VERCEL_URL;
+    if (vercelUrl) {
+      return `https://${vercelUrl}/join/${token}`;
+    }
+    
+    // Default fallback for development
+    return `http://localhost:3000/join/${token}`;
   };
 
   if (!isOpen) return null;
