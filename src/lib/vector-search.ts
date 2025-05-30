@@ -18,12 +18,14 @@ const EmbeddingResponseSchema = z.object({
   }))
 });
 
-// Search result with similarity score
+// Search result with similarity score and enhanced user context
 export interface VectorSearchResult {
   id: string;
   content: string;
+  enhanced_content?: string; // Enhanced content with user context used for embedding
   tags: string[];
   addedBy: string;
+  addedByName?: string; // Cached display name for quick access
   createdAt: Date;
   updatedAt: Date;
   similarity: number;
@@ -96,16 +98,20 @@ export async function searchKnowledgeVector(
     return data.map((item: {
       id: string;
       content: string;
+      enhanced_content?: string;
       tags: string[];
       added_by: string;
+      added_by_name?: string;
       created_at: string;
       updated_at: string;
       similarity: number;
     }) => ({
       id: item.id,
       content: item.content,
+      enhanced_content: item.enhanced_content,
       tags: item.tags || [],
       addedBy: item.added_by,
+      addedByName: item.added_by_name,
       createdAt: new Date(item.created_at),
       updatedAt: new Date(item.updated_at),
       similarity: item.similarity
@@ -198,18 +204,29 @@ export async function getRecentKnowledgeVectors(
 
     if (error) {
       console.error('Supabase query error:', error);
-      throw new Error(`Failed to fetch recent entries: ${error.message}`);
+      throw new Error(`Failed to get recent entries: ${error.message}`);
     }
 
     if (!data) {
       return [];
     }
 
-    return data.map(item => ({
+    return data.map((item: {
+      id: string;
+      content: string;
+      enhanced_content?: string;
+      tags: string[];
+      added_by: string;
+      added_by_name?: string;
+      created_at: string;
+      updated_at: string;
+    }) => ({
       id: item.id,
       content: item.content,
+      enhanced_content: item.enhanced_content,
       tags: item.tags || [],
       addedBy: item.added_by,
+      addedByName: item.added_by_name,
       createdAt: new Date(item.created_at),
       updatedAt: new Date(item.updated_at),
       similarity: 1.0 // Not applicable for recent entries

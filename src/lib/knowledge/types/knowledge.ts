@@ -1,9 +1,11 @@
-// Updated knowledge entry interface (tags-based) with revision and shopping support
+// Updated knowledge entry interface (tags-based) with revision and shopping support and user context
 export interface KnowledgeEntry {
   id?: string;
   content: string;
+  enhanced_content?: string;  // Enhanced content with user context used for embedding
   tags: string[]; // Primary organization method
   addedBy: string;
+  addedByName?: string;       // Cached display name for quick access
   createdAt: Date;
   updatedAt: Date;
   accountId: string;

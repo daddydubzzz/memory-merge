@@ -4,12 +4,16 @@
 -- 1. Enable the vector extension (if not already enabled)
 create extension if not exists vector;
 
--- 2. Create the knowledge_vectors table (if not already created)
+-- 2. Create the main knowledge_vectors table if it doesn't exist
 create table if not exists knowledge_vectors (
-  id text primary key,
+  id text primary key default gen_random_uuid()::text,
   account_id text not null,
   content text not null,
-  embedding vector(1536) not null,
+  enhanced_content text, -- Enhanced content with user context used for embedding
+  added_by_name text, -- Cached display name for quick access
+  tags text[] default '{}',
+  added_by text not null default '',
+  embedding vector(1536),
   created_at timestamptz default now(),
   updated_at timestamptz default now()
 );
@@ -42,6 +46,24 @@ BEGIN
     END IF;
 END $$;
 
+-- Add enhanced_content column if it doesn't exist
+DO $$ 
+BEGIN 
+    IF NOT EXISTS (SELECT 1 FROM information_schema.columns 
+                   WHERE table_name = 'knowledge_vectors' AND column_name = 'enhanced_content') THEN
+        ALTER TABLE knowledge_vectors ADD COLUMN enhanced_content text;
+    END IF;
+END $$;
+
+-- Add added_by_name column if it doesn't exist
+DO $$ 
+BEGIN 
+    IF NOT EXISTS (SELECT 1 FROM information_schema.columns 
+                   WHERE table_name = 'knowledge_vectors' AND column_name = 'added_by_name') THEN
+        ALTER TABLE knowledge_vectors ADD COLUMN added_by_name text;
+    END IF;
+END $$;
+
 -- 4. Remove category column if it exists (migration to tags)
 DO $$ 
 BEGIN 
@@ -60,7 +82,7 @@ create index if not exists knowledge_vectors_created_at_idx on knowledge_vectors
 create index if not exists knowledge_vectors_embedding_idx on knowledge_vectors 
 using hnsw (embedding vector_cosine_ops);
 
--- 7. Create the vector similarity search function
+-- 7. Create the vector similarity search function with enhanced user context support
 -- Drop existing function if it exists (for schema migration)
 DROP FUNCTION IF EXISTS match_knowledge_vectors(vector, text, double precision, integer);
 
@@ -74,8 +96,10 @@ RETURNS TABLE (
   id text,
   account_id text,
   content text,
+  enhanced_content text,
   tags text[],
   added_by text,
+  added_by_name text,
   created_at timestamptz,
   updated_at timestamptz,
   similarity float
@@ -86,8 +110,10 @@ AS $$
     knowledge_vectors.id,
     knowledge_vectors.account_id,
     knowledge_vectors.content,
+    knowledge_vectors.enhanced_content,
     knowledge_vectors.tags,
     knowledge_vectors.added_by,
+    knowledge_vectors.added_by_name,
     knowledge_vectors.created_at,
     knowledge_vectors.updated_at,
     (knowledge_vectors.embedding <#> query_embedding) * -1 AS similarity

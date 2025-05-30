@@ -204,10 +204,18 @@ Your job is to:
 - Always provide full, readable content that stands alone!
 - Smart matching: "cheese" matches "sliced cheese", "milk" matches "whole milk"!`;
 
-// Enhanced system prompt for generating responses with shopping list awareness
-const RESPONSE_PROMPT = `You are a helpful AI assistant for managing shared household and personal knowledge with smart shopping list capabilities.
+// Enhanced system prompt for generating responses with shopping list awareness and user context
+const RESPONSE_PROMPT = `You are a helpful AI assistant for managing shared household and personal knowledge with smart shopping list capabilities and user context awareness.
 
 Given a user's query and relevant knowledge entries, provide a helpful, conversational response. 
+
+**USER CONTEXT INTELLIGENCE**:
+- Each entry shows who added it (look for "Added by [Name]:" in the enhanced content)
+- When users ask about specific people ("What did Walter say about...", "Did John mention..."), prioritize entries from that person
+- If you can't find exact matches but see related information from a specific person, mention that connection
+- For example: "I didn't find specific information about that, but Walter did mention something about testicles that might be related..."
+- Use this context to make intelligent connections and provide more personalized responses
+- When multiple people contributed to a topic, acknowledge the different perspectives
 
 **SHOPPING LIST INTELLIGENCE**:
 - For "What do I need?" queries: Show only ACTIVE shopping list items (no "purchased" or "cleared" tags)
@@ -220,11 +228,12 @@ Guidelines:
 - Be warm and conversational, like talking to a helpful friend
 - If information is found, present it clearly and offer to help with related tasks
 - If no exact match, suggest related information or ask clarifying questions
+- Use user context to make smart connections ("Walter mentioned..." or "Based on what John shared...")
 - Always maintain a helpful, supportive tone
 - Keep responses concise but complete
 - Don't assume specific relationships (could be family, roommates, partners, etc.)
 - Make the experience personal to the current user
-- When referencing entries, show their tags like: 🏷️ [wifi, password]: "The WiFi password is..."
+- When referencing entries, show their tags and who added them: 🏷️ [wifi, password] by John: "The WiFi password is..."
 - For shopping lists, present items clearly: "You need: butter, milk, cheese, bread"
 - For empty shopping lists, be encouraging: "Your shopping list is empty! Ready to add some items?"
 
@@ -300,10 +309,17 @@ export async function generateResponse(
 ): Promise<QueryResponse> {
   try {
     const openai = createOpenAIClient();
+    
+    // Enhanced context that includes user information
     const context = relevantEntries.length > 0 
-      ? `Relevant information found:\n${relevantEntries.map(entry => 
-          `🏷️ [${entry.tags.join(', ')}]: ${entry.content}`
-        ).join('\n')}`
+      ? `Relevant information found:\n${relevantEntries.map(entry => {
+          // Get the user name from enhanced content if available, or fall back to addedBy
+          const enhancedContent = (entry as KnowledgeEntry & { enhanced_content?: string }).enhanced_content || entry.content;
+          const userMatch = enhancedContent.match(/^Added by ([^:]+):/);
+          const userName = userMatch ? userMatch[1] : 'Someone';
+          
+          return `🏷️ [${entry.tags.join(', ')}] by ${userName}: ${entry.content}`;
+        }).join('\n')}`
       : 'No specific information found in the knowledge base.';
 
     const completion = await openai.chat.completions.create({
@@ -315,7 +331,7 @@ export async function generateResponse(
       tools: [{ type: "function", function: responseFunction }],
       tool_choice: { type: "function", function: { name: "generate_response" } },
       temperature: 0.5, // Reduced from 0.7 for more consistency
-      max_tokens: 500,
+      max_tokens: 600, // Increased to allow for more detailed user-aware responses
     });
 
     const toolCall = completion.choices[0]?.message?.tool_calls?.[0];
@@ -331,7 +347,12 @@ export async function generateResponse(
       query,
       confidence: validatedResult.confidence,
       sources: relevantEntries.length,
-      tags: relevantEntries.map(e => e.tags).flat()
+      tags: relevantEntries.map(e => e.tags).flat(),
+      userContext: relevantEntries.map(e => {
+        const enhancedContent = (e as KnowledgeEntry & { enhanced_content?: string }).enhanced_content || e.content;
+        const userMatch = enhancedContent.match(/^Added by ([^:]+):/);
+        return userMatch ? userMatch[1] : 'Unknown';
+      })
     });
     
     return {
@@ -343,10 +364,18 @@ export async function generateResponse(
   } catch (error) {
     console.error('Error generating response:', error);
     
-    // Enhanced fallback response
+    // Enhanced fallback response with user context
     if (relevantEntries.length > 0) {
+      // Try to extract user context from entries for fallback
+      const userInfo = relevantEntries.map(entry => {
+        const enhancedContent = (entry as KnowledgeEntry & { enhanced_content?: string }).enhanced_content || entry.content;
+        const userMatch = enhancedContent.match(/^Added by ([^:]+):/);
+        const userName = userMatch ? userMatch[1] : 'Someone';
+        return `${userName} mentioned: ${entry.content.substring(0, 50)}...`;
+      }).slice(0, 2);
+      
       return {
-        answer: `I found ${relevantEntries.length} related item${relevantEntries.length > 1 ? 's' : ''}: ${relevantEntries.map(e => e.content).slice(0, 2).join(', ')}${relevantEntries.length > 2 ? '...' : ''}`,
+        answer: `I found ${relevantEntries.length} related item${relevantEntries.length > 1 ? 's' : ''}: ${userInfo.join(', ')}`,
         confidence: 0.5,
         sources: relevantEntries,
         suggestions: ["Tell me more about this", "Show me all related items", "Help me organize this better"]
@@ -359,6 +388,10 @@ export async function generateResponse(
       if (lowerQuery.includes('where') || lowerQuery.includes('find')) {
         suggestions.push("Try describing what you're looking for differently");
         suggestions.push("Tell me more details about the item");
+      } else if (lowerQuery.includes('walter') || lowerQuery.includes('john') || /\b[A-Z][a-z]+\b/.test(query)) {
+        // If query contains potential names
+        suggestions.push("Try searching for topics that person might have discussed");
+        suggestions.push("Browse recent entries to see what they've shared");
       } else {
         suggestions.push("Try being more specific");
         suggestions.push("Add some context or details");

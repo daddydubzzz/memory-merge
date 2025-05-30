@@ -6,7 +6,8 @@
     "dev": "next dev --turbopack",
     "build": "next build",
     "start": "next start",
-    "lint": "next lint"
+    "lint": "next lint",
+    "migrate:user-context": "tsx scripts/migrate-user-context.ts"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.49.8",

@@ -2,6 +2,7 @@ import OpenAI from 'openai';
 import { z } from 'zod';
 import { supabase } from './supabase';
 import type { KnowledgeEntry } from './knowledge/types';
+import { getUserDisplayName } from './knowledge/services/utility-service';
 
 // Create OpenAI client - this should only be used server-side
 function createOpenAIClient() {
@@ -47,23 +48,36 @@ async function generateEmbedding(text: string): Promise<number[]> {
 
 /**
  * Store knowledge entry with its vector embedding in Supabase
+ * Enhanced to include user context in the embedded content for better search relevance
  */
 export async function storeWithEmbedding(
   accountId: string,
   entry: Omit<KnowledgeEntry, 'id' | 'createdAt' | 'updatedAt' | 'accountId'>
 ): Promise<string> {
   try {
-    // Generate embedding for the content
-    const embedding = await generateEmbedding(entry.content);
+    // Get the user's display name to include in the embedding
+    const userName = await getUserDisplayName(entry.addedBy);
+    
+    // Create enhanced content that includes user context for embedding
+    // This allows the AI to make connections based on who added what information
+    const enhancedContent = `Added by ${userName}: ${entry.content}`;
+    
+    console.log(`📝 Creating embedding with user context for: ${userName}`);
+    
+    // Generate embedding for the enhanced content (with user context)
+    const embedding = await generateEmbedding(enhancedContent);
 
     // Store in Supabase with embedding
+    // Store both original content and enhanced content for different purposes
     const { data, error } = await supabase
       .from('knowledge_vectors')
       .insert({
         account_id: accountId,
-        content: entry.content,
+        content: entry.content, // Original content for display
+        enhanced_content: enhancedContent, // Enhanced content that was embedded
         tags: entry.tags,
         added_by: entry.addedBy,
+        added_by_name: userName, // Store the display name for quick access
         embedding: embedding,
       })
       .select('id')
@@ -78,6 +92,7 @@ export async function storeWithEmbedding(
       throw new Error('No ID returned from Supabase insert');
     }
 
+    console.log(`✅ Stored embedding with user context for: ${userName}`);
     return data.id;
   } catch (error) {
     console.error('Error in storeWithEmbedding:', error);
@@ -87,6 +102,7 @@ export async function storeWithEmbedding(
 
 /**
  * Update existing knowledge vector with new content and embedding
+ * Enhanced to include user context in the embedded content
  */
 export async function updateWithEmbedding(
   id: string,
@@ -94,15 +110,34 @@ export async function updateWithEmbedding(
 ): Promise<void> {
   try {
     let embedding: number[] | undefined;
+    let enhancedContent: string | undefined;
     
     // Generate new embedding if content changed
     if (updates.content) {
-      embedding = await generateEmbedding(updates.content);
+      // Get the existing entry to find out who added it
+      const { data: existingEntry, error: fetchError } = await supabase
+        .from('knowledge_vectors')
+        .select('added_by, added_by_name')
+        .eq('id', id)
+        .single();
+        
+      if (fetchError) {
+        console.error('Error fetching existing entry for update:', fetchError);
+        throw new Error(`Failed to fetch existing entry: ${fetchError.message}`);
+      }
+      
+      // Use cached name or fetch it if not available
+      const userName = existingEntry.added_by_name || await getUserDisplayName(existingEntry.added_by);
+      enhancedContent = `Added by ${userName}: ${updates.content}`;
+      
+      console.log(`📝 Updating embedding with user context for: ${userName}`);
+      embedding = await generateEmbedding(enhancedContent);
     }
 
     const updateData: Record<string, unknown> = { ...updates };
     if (embedding) {
       updateData.embedding = embedding;
+      updateData.enhanced_content = enhancedContent;
     }
 
     const { error } = await supabase
@@ -114,6 +149,8 @@ export async function updateWithEmbedding(
       console.error('Supabase update error:', error);
       throw new Error(`Failed to update embedding: ${error.message}`);
     }
+    
+    console.log(`✅ Updated embedding with user context`);
   } catch (error) {
     console.error('Error in updateWithEmbedding:', error);
     throw error;

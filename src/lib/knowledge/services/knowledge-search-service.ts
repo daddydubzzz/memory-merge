@@ -69,8 +69,10 @@ export class KnowledgeSearchService {
         const entries: KnowledgeEntry[] = result.results.map((item: Record<string, unknown>) => ({
           id: item.id as string,
           content: item.content as string,
+          enhanced_content: item.enhanced_content as string | undefined,
           tags: (item.tags as string[]) || [],
           addedBy: item.addedBy as string,
+          addedByName: item.addedByName as string | undefined,
           createdAt: new Date(item.createdAt as string),
           updatedAt: new Date(item.updatedAt as string),
           accountId: this.accountId,
@@ -198,8 +200,10 @@ export class KnowledgeSearchService {
         const entries: KnowledgeEntry[] = result.results.map((item: Record<string, unknown>) => ({
           id: item.id as string,
           content: item.content as string,
+          enhanced_content: item.enhanced_content as string | undefined,
           tags: (item.tags as string[]) || [],
           addedBy: item.addedBy as string,
+          addedByName: item.addedByName as string | undefined,
           createdAt: new Date(item.createdAt as string),
           updatedAt: new Date(item.updatedAt as string),
           accountId: this.accountId,
