@@ -168,35 +168,77 @@ export async function validateShareLink(token: string): Promise<{
   space?: Space;
   error?: string;
 }> {
+  const startTime = Date.now();
+  console.log(`🔄 Starting validation for token: ${token}`);
+  
   try {
+    console.log(`🔍 Looking up share link by token...`);
     const shareLink = await getShareLinkByToken(token);
     
     if (!shareLink) {
+      console.log(`❌ Share link not found for token: ${token}`);
       return { valid: false, error: 'Share link not found' };
     }
+    
+    console.log(`✅ Share link found:`, {
+      id: shareLink.id,
+      spaceId: shareLink.spaceId,
+      isActive: shareLink.isActive,
+      usageCount: shareLink.usageCount,
+      maxUses: shareLink.maxUses,
+      expiresAt: shareLink.expiresAt
+    });
 
     if (!shareLink.isActive) {
+      console.log(`❌ Share link is deactivated: ${token}`);
       return { valid: false, error: 'Share link has been deactivated' };
     }
 
     if (shareLink.expiresAt && shareLink.expiresAt < new Date()) {
+      console.log(`❌ Share link has expired: ${token}, expired at: ${shareLink.expiresAt}`);
       return { valid: false, error: 'Share link has expired' };
     }
 
     if (shareLink.maxUses && shareLink.usageCount >= shareLink.maxUses) {
+      console.log(`❌ Share link usage limit reached: ${token}, used ${shareLink.usageCount}/${shareLink.maxUses}`);
       return { valid: false, error: 'Share link usage limit reached' };
     }
 
     // Get the space details
+    console.log(`🔍 Getting space details for spaceId: ${shareLink.spaceId}`);
     const space = await getSpaceById(shareLink.spaceId);
+    
     if (!space) {
+      console.log(`❌ Associated space not found for spaceId: ${shareLink.spaceId}`);
       return { valid: false, error: 'Associated space not found' };
     }
+    
+    console.log(`✅ Space found:`, {
+      id: space.id,
+      name: space.name,
+      memberCount: space.members.length
+    });
 
+    const duration = Date.now() - startTime;
+    console.log(`✅ Validation successful for token: ${token} (took ${duration}ms)`);
     return { valid: true, shareLink, space };
   } catch (error) {
-    console.error('Error validating share link:', error);
-    return { valid: false, error: 'Validation failed' };
+    const duration = Date.now() - startTime;
+    console.error(`❌ Error validating share link: ${token} (took ${duration}ms)`, error);
+    
+    // Provide more specific error messages based on the error type
+    let errorMessage = 'Validation failed';
+    if (error instanceof Error) {
+      if (error.message.includes('offline') || error.message.includes('network')) {
+        errorMessage = 'Network connection issue. Please check your internet connection.';
+      } else if (error.message.includes('permission') || error.message.includes('auth')) {
+        errorMessage = 'Authentication issue. Please try signing in again.';
+      } else {
+        errorMessage = error.message;
+      }
+    }
+    
+    return { valid: false, error: errorMessage };
   }
 }
 
@@ -207,17 +249,25 @@ export async function joinSpaceByShareLink(token: string, userId: string): Promi
   spaceName?: string;
   error?: string;
 }> {
+  const startTime = Date.now();
+  console.log(`🔄 Starting join process for token: ${token}, userId: ${userId}`);
+  
   try {
     // Validate the share link
+    console.log(`🔍 Validating share link before joining...`);
     const validation = await validateShareLink(token);
+    
     if (!validation.valid || !validation.shareLink || !validation.space) {
+      console.log(`❌ Share link validation failed:`, validation.error);
       return { success: false, error: validation.error || 'Invalid share link' };
     }
 
     const { shareLink, space } = validation;
+    console.log(`✅ Share link validated, proceeding with join process`);
 
     // Check if user is already a member
     if (space.members.includes(userId)) {
+      console.log(`ℹ️ User ${userId} is already a member of space ${space.id}`);
       return { 
         success: true, 
         spaceId: space.id!, 
@@ -226,23 +276,35 @@ export async function joinSpaceByShareLink(token: string, userId: string): Promi
       };
     }
 
+    console.log(`🔄 Adding user ${userId} to space ${space.id}`);
     // Add user to space
     const spaceRef = doc(db, 'spaces', space.id!);
     await updateDoc(spaceRef, {
       members: arrayUnion(userId),
       updatedAt: serverTimestamp(),
     });
+    console.log(`✅ User added to space members`);
 
     // Update user's profile
+    console.log(`🔄 Adding space to user profile...`);
     await addSpaceToUserProfile(userId, space.id!);
+    console.log(`✅ Space added to user profile`);
 
     // Increment usage count
+    console.log(`🔄 Incrementing share link usage count...`);
     const shareLinkRef = doc(db, 'shareLinks', shareLink.id!);
     await updateDoc(shareLinkRef, {
       usageCount: shareLink.usageCount + 1,
     });
+    console.log(`✅ Usage count incremented to ${shareLink.usageCount + 1}`);
 
-    console.log('✅ User joined space via share link:', { userId, spaceId: space.id, token });
+    const duration = Date.now() - startTime;
+    console.log(`✅ User joined space successfully via share link (took ${duration}ms):`, { 
+      userId, 
+      spaceId: space.id, 
+      spaceName: space.name,
+      token 
+    });
 
     return { 
       success: true, 
@@ -250,8 +312,24 @@ export async function joinSpaceByShareLink(token: string, userId: string): Promi
       spaceName: space.name 
     };
   } catch (error) {
-    console.error('Error joining space by share link:', error);
-    return { success: false, error: 'Failed to join space' };
+    const duration = Date.now() - startTime;
+    console.error(`❌ Error joining space by share link (took ${duration}ms):`, error);
+    
+    // Provide more specific error messages based on the error type
+    let errorMessage = 'Failed to join space';
+    if (error instanceof Error) {
+      if (error.message.includes('offline') || error.message.includes('network')) {
+        errorMessage = 'Network connection issue. Please check your internet connection and try again.';
+      } else if (error.message.includes('permission') || error.message.includes('auth')) {
+        errorMessage = 'Authentication issue. Please ensure you are signed in and try again.';
+      } else if (error.message.includes('not found')) {
+        errorMessage = 'Space or share link no longer exists.';
+      } else {
+        errorMessage = `Failed to join space: ${error.message}`;
+      }
+    }
+    
+    return { success: false, error: errorMessage };
   }
 }
 

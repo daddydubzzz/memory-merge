@@ -6,15 +6,24 @@ import AuthForm from '@/components/AuthForm';
 import Dashboard from '@/components/Dashboard';
 
 function AppContent() {
-  const { user, loading } = useAuth();
+  const { user, loading, profileReady } = useAuth();
 
-  // Show loading spinner while checking auth
-  if (loading) {
+  // Show loading spinner while checking auth or setting up profile
+  if (loading || (user && !profileReady)) {
+    const loadingMessage = !user 
+      ? 'Loading...' 
+      : 'Setting up your account...';
+      
     return (
       <div className="min-h-screen bg-gradient-to-br from-slate-50 via-blue-50 to-indigo-100 flex items-center justify-center">
         <div className="text-center">
           <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-500 mx-auto mb-4"></div>
-          <p className="text-gray-600">Loading...</p>
+          <p className="text-gray-600">{loadingMessage}</p>
+          {user && !profileReady && (
+            <p className="text-sm text-gray-500 mt-2">
+              This may take a moment for new accounts...
+            </p>
+          )}
         </div>
       </div>
     );
@@ -25,7 +34,7 @@ function AppContent() {
     return <AuthForm onSuccess={() => {}} />;
   }
 
-  // Show dashboard if user is signed in - it will handle space management internally
+  // Show dashboard if user is signed in and profile is ready
   return <Dashboard />;
 }
 

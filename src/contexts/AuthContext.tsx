@@ -18,6 +18,7 @@ import { createPersonalSpace, getUserProfile } from '@/lib/knowledge';
 interface AuthContextType {
   user: User | null;
   loading: boolean;
+  profileReady: boolean;
   signin: (email: string, password: string) => Promise<void>;
   signup: (email: string, password: string) => Promise<void>;
   signout: () => Promise<void>;
@@ -38,11 +39,15 @@ export function useAuth() {
 export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
   const [loading, setLoading] = useState(true);
+  const [profileReady, setProfileReady] = useState(false);
+  const [profileSetupInProgress, setProfileSetupInProgress] = useState(false);
 
   // Create user profile in Firestore and ensure personal space exists
   const createUserProfile = async (user: User) => {
     try {
       console.log('🔄 Creating/updating user profile for:', user.uid);
+      setProfileSetupInProgress(true);
+      setProfileReady(false);
       
       // Create basic user document for backward compatibility
       const userRef = doc(db, 'users', user.uid);
@@ -73,9 +78,14 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       } else {
         console.log('✅ User profile already exists');
       }
+      
+      setProfileReady(true);
     } catch (error) {
       console.error('❌ Error creating user profile:', error);
+      setProfileReady(false);
       throw error; // Re-throw to handle in the calling function
+    } finally {
+      setProfileSetupInProgress(false);
     }
   };
 
@@ -96,6 +106,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   };
 
   const signout = () => {
+    setProfileReady(false);
     return signOut(auth);
   };
 
@@ -105,16 +116,54 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, async (user) => {
+      console.log('🔄 Auth state changed:', user ? 'signed in' : 'signed out');
+      
       setUser(user);
-      setLoading(false);
+      
+      if (user) {
+        // User is signed in, but we need to ensure profile is ready
+        if (!profileSetupInProgress) {
+          try {
+            // Check if profile already exists
+            const userProfile = await getUserProfile(user.uid);
+            if (userProfile) {
+              console.log('✅ User profile already exists and ready');
+              setProfileReady(true);
+              setLoading(false);
+            } else {
+              // Profile doesn't exist, create it
+              console.log('🏗️ Profile missing, creating...');
+              await createUserProfile(user);
+              setLoading(false);
+            }
+          } catch (error) {
+            console.error('❌ Error checking user profile:', error);
+            setProfileReady(false);
+            setLoading(false);
+          }
+        }
+        // If profile setup is in progress, loading will be set to false when it completes
+      } else {
+        // User is signed out
+        setProfileReady(false);
+        setLoading(false);
+      }
     });
 
     return unsubscribe;
-  }, []);
+  }, [profileSetupInProgress]);
+
+  // Update loading state when profile setup completes
+  useEffect(() => {
+    if (user && profileReady && !profileSetupInProgress) {
+      setLoading(false);
+    }
+  }, [user, profileReady, profileSetupInProgress]);
 
   const value = {
     user,
     loading,
+    profileReady,
     signin,
     signup,
     signout,

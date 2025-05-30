@@ -1,8 +1,8 @@
 'use client';
 
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { useParams, useRouter } from 'next/navigation';
-import { Users, Heart, AlertCircle, CheckCircle } from 'lucide-react';
+import { Users, Heart, AlertCircle, CheckCircle, RefreshCw } from 'lucide-react';
 import { useAuth } from '@/contexts/AuthContext';
 import { 
   validateShareLink, 
@@ -11,81 +11,214 @@ import {
   type Space 
 } from '@/lib/knowledge';
 
+type ErrorType = 'validation' | 'network' | 'auth' | 'join' | 'unknown';
+
+interface DetailedError {
+  type: ErrorType;
+  message: string;
+  retryable: boolean;
+  originalError?: Error;
+}
+
+// Utility functions moved outside component to avoid dependency issues
+const delay = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
+
+const retryWithBackoff = async <T,>(
+  operation: () => Promise<T>,
+  attempt: number = 0,
+  maxRetries: number = 3
+): Promise<T> => {
+  try {
+    return await operation();
+  } catch (error) {
+    if (attempt >= maxRetries) {
+      throw error;
+    }
+    
+    const backoffMs = Math.pow(2, attempt) * 1000; // 1s, 2s, 4s
+    console.log(`Retrying operation in ${backoffMs}ms (attempt ${attempt + 1}/${maxRetries})`);
+    await delay(backoffMs);
+    return retryWithBackoff(operation, attempt + 1, maxRetries);
+  }
+};
+
 export default function JoinPage() {
   const params = useParams();
   const router = useRouter();
-  const { user, signInWithGoogle } = useAuth();
+  const { user, loading: authLoading, profileReady, signInWithGoogle } = useAuth();
   const token = params.token as string;
 
   const [loading, setLoading] = useState(true);
+  const [validating, setValidating] = useState(true);
   const [joining, setJoining] = useState(false);
   const [shareLink, setShareLink] = useState<ShareLink | null>(null);
   const [space, setSpace] = useState<Space | null>(null);
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError] = useState<DetailedError | null>(null);
   const [success, setSuccess] = useState(false);
+  const [retryAttempt, setRetryAttempt] = useState(0);
+  const [loadingMessage, setLoadingMessage] = useState('Validating invite...');
+  
+  const maxRetries = 3;
+  const validationAttempted = useRef(false);
 
-  // Validate the share link on load
-  useEffect(() => {
-    const validateToken = async () => {
-      setLoading(true);
-      try {
-        const validation = await validateShareLink(token);
-        
-        if (validation.valid && validation.shareLink && validation.space) {
-          setShareLink(validation.shareLink);
-          setSpace(validation.space);
-        } else {
-          setError(validation.error || 'Invalid share link');
-        }
-      } catch (error) {
-        console.error('Error validating share link:', error);
-        setError('Failed to validate share link');
+  // Helper function to determine error type and create detailed error
+  const createError = (error: unknown, context: string): DetailedError => {
+    console.error(`Error in ${context}:`, error);
+    
+    if (error instanceof Error) {
+      const message = error.message.toLowerCase();
+      
+      if (message.includes('network') || message.includes('fetch') || message.includes('connection')) {
+        return {
+          type: 'network',
+          message: 'Network connection issue. Please check your internet connection.',
+          retryable: true,
+          originalError: error
+        };
       }
-      setLoading(false);
-    };
-
-    if (token) {
-      validateToken();
+      
+      if (message.includes('auth') || message.includes('permission') || message.includes('unauthorized')) {
+        return {
+          type: 'auth',
+          message: 'Authentication issue. Please try signing in again.',
+          retryable: true,
+          originalError: error
+        };
+      }
+      
+      if (message.includes('not found') || message.includes('invalid') || message.includes('expired')) {
+        return {
+          type: 'validation',
+          message: error.message,
+          retryable: false,
+          originalError: error
+        };
+      }
+      
+      return {
+        type: 'unknown',
+        message: error.message || 'An unexpected error occurred.',
+        retryable: true,
+        originalError: error
+      };
     }
-  }, [token]);
+    
+    return {
+      type: 'unknown',
+      message: 'An unexpected error occurred. Please try again.',
+      retryable: true
+    };
+  };
+
+  // Validate the share link with retry logic
+  const validateToken = useCallback(async (attemptNumber: number = 0) => {
+    if (!token) return;
+    
+    setValidating(true);
+    setRetryAttempt(attemptNumber);
+    setLoadingMessage(
+      attemptNumber === 0 
+        ? 'Validating invite...' 
+        : `Retrying validation... (${attemptNumber}/${maxRetries})`
+    );
+    
+    try {
+      const validation = await retryWithBackoff(async () => {
+        console.log(`🔄 Validating share link: ${token} (attempt ${attemptNumber + 1})`);
+        return await validateShareLink(token);
+      }, attemptNumber, maxRetries);
+      
+      if (validation.valid && validation.shareLink && validation.space) {
+        console.log('✅ Share link validation successful');
+        setShareLink(validation.shareLink);
+        setSpace(validation.space);
+        setError(null);
+        setLoadingMessage('Invite validated successfully!');
+      } else {
+        const errorMsg = validation.error || 'Invalid share link';
+        console.log('❌ Share link validation failed:', errorMsg);
+        setError(createError(new Error(errorMsg), 'validation'));
+      }
+    } catch (error) {
+      console.error('❌ Share link validation error:', error);
+      setError(createError(error, 'validation'));
+    } finally {
+      setValidating(false);
+      setLoading(false);
+    }
+  }, [token, maxRetries]);
+
+  // Initial validation effect
+  useEffect(() => {
+    if (token && !validationAttempted.current) {
+      validationAttempted.current = true;
+      validateToken(0);
+    }
+  }, [token, validateToken]);
 
   const handleJoinSpace = useCallback(async () => {
-    if (!user || !token) return;
+    if (!user || !token) {
+      console.log('❌ Cannot join space: missing user or token');
+      return;
+    }
 
+    console.log('🔄 Attempting to join space...');
     setJoining(true);
+    setLoadingMessage('Joining space...');
+    
     try {
-      const result = await joinSpaceByShareLink(token, user.uid);
+      const result = await retryWithBackoff(async () => {
+        return await joinSpaceByShareLink(token, user.uid);
+      }, 0, maxRetries);
       
       if (result.success) {
+        console.log('✅ Successfully joined space');
         setSuccess(true);
+        setLoadingMessage('Welcome! Redirecting...');
         // Redirect to the space after a short delay
         setTimeout(() => {
           router.push('/');
         }, 2000);
       } else {
-        setError(result.error || 'Failed to join space');
+        console.log('❌ Failed to join space:', result.error);
+        setError(createError(new Error(result.error || 'Failed to join space'), 'join'));
       }
     } catch (error) {
-      console.error('Error joining space:', error);
-      setError('Failed to join space. Please try again.');
+      console.error('❌ Error joining space:', error);
+      setError(createError(error, 'join'));
+    } finally {
+      setJoining(false);
     }
-    setJoining(false);
-  }, [user, token, router]);
+  }, [user, token, router, maxRetries]);
 
-  // Handle joining after user authenticates
+  // Handle joining after user authenticates and profile is ready
   useEffect(() => {
-    if (user && shareLink && space && !success && !joining) {
+    if (user && profileReady && shareLink && space && !success && !joining && !authLoading) {
+      console.log('🔄 User authenticated and profile ready, joining space...');
       handleJoinSpace();
     }
-  }, [user, shareLink, space, success, joining, handleJoinSpace]);
+  }, [user, profileReady, shareLink, space, success, joining, authLoading, handleJoinSpace]);
 
   const handleSignIn = async () => {
+    setLoadingMessage('Signing in...');
     try {
       await signInWithGoogle();
       // The useEffect will handle joining after authentication
     } catch (error) {
       console.error('Error signing in:', error);
-      setError('Failed to sign in. Please try again.');
+      setError(createError(error, 'auth'));
+    }
+  };
+
+  const handleRetry = () => {
+    setError(null);
+    setRetryAttempt(0);
+    if (!shareLink || !space) {
+      // Retry validation
+      validateToken(0);
+    } else if (user && !success) {
+      // Retry joining
+      handleJoinSpace();
     }
   };
 
@@ -101,18 +234,25 @@ export default function JoinPage() {
     return colors[space.color as keyof typeof colors] || colors.blue;
   };
 
-  if (loading) {
+  // Show loading state
+  if (loading || validating || authLoading) {
     return (
       <div className="min-h-screen bg-gradient-to-br from-slate-50 via-blue-50 to-indigo-100 flex items-center justify-center">
         <div className="text-center">
           <div className="w-16 h-16 border-4 border-blue-500/30 border-t-blue-500 rounded-full animate-spin mx-auto mb-6"></div>
-          <h2 className="text-2xl font-bold text-gray-800 mb-2">Validating invite...</h2>
-          <p className="text-gray-600">Please wait while we check your invitation</p>
+          <h2 className="text-2xl font-bold text-gray-800 mb-2">{loadingMessage}</h2>
+          <p className="text-gray-600">Please wait while we process your invitation</p>
+          {retryAttempt > 0 && (
+            <p className="text-sm text-gray-500 mt-2">
+              This may take a moment for new accounts...
+            </p>
+          )}
         </div>
       </div>
     );
   }
 
+  // Show error state with retry option
   if (error) {
     return (
       <div className="min-h-screen bg-gradient-to-br from-slate-50 via-blue-50 to-indigo-100 flex items-center justify-center p-4">
@@ -120,19 +260,40 @@ export default function JoinPage() {
           <div className="w-16 h-16 bg-gradient-to-r from-red-500 to-pink-500 rounded-full flex items-center justify-center mx-auto mb-6">
             <AlertCircle className="w-8 h-8 text-white" />
           </div>
-          <h1 className="text-2xl font-bold text-gray-800 mb-4">Invalid Invitation</h1>
-          <p className="text-gray-600 mb-6">{error}</p>
-          <button
-            onClick={() => router.push('/')}
-            className="px-6 py-3 bg-gradient-to-r from-blue-600 to-purple-600 text-white rounded-xl font-semibold hover:from-blue-700 hover:to-purple-700 transition-all duration-200"
-          >
-            Go to Home
-          </button>
+          <h1 className="text-2xl font-bold text-gray-800 mb-4">
+            {error.type === 'validation' ? 'Invalid Invitation' : 'Connection Issue'}
+          </h1>
+          <p className="text-gray-600 mb-6">{error.message}</p>
+          
+          <div className="space-y-3">
+            {error.retryable && (
+              <button
+                onClick={handleRetry}
+                className="w-full px-6 py-3 bg-gradient-to-r from-blue-600 to-purple-600 text-white rounded-xl font-semibold hover:from-blue-700 hover:to-purple-700 transition-all duration-200 flex items-center justify-center"
+              >
+                <RefreshCw className="w-4 h-4 mr-2" />
+                Try Again
+              </button>
+            )}
+            <button
+              onClick={() => router.push('/')}
+              className="w-full px-6 py-3 bg-gray-100 text-gray-700 rounded-xl font-semibold hover:bg-gray-200 transition-all duration-200"
+            >
+              Go to Home
+            </button>
+          </div>
+          
+          {error.type === 'network' && (
+            <p className="text-xs text-gray-500 mt-4">
+              If the problem persists, please check your internet connection and try again.
+            </p>
+          )}
         </div>
       </div>
     );
   }
 
+  // Show success state
   if (success) {
     return (
       <div className="min-h-screen bg-gradient-to-br from-slate-50 via-blue-50 to-indigo-100 flex items-center justify-center p-4">
@@ -150,11 +311,33 @@ export default function JoinPage() {
     );
   }
 
+  // Validation failed but no specific error (edge case)
   if (!space || !shareLink) {
     return (
-      <div className="min-h-screen bg-gradient-to-br from-slate-50 via-blue-50 to-indigo-100 flex items-center justify-center">
-        <div className="text-center">
-          <p className="text-gray-600">Something went wrong. Please try again.</p>
+      <div className="min-h-screen bg-gradient-to-br from-slate-50 via-blue-50 to-indigo-100 flex items-center justify-center p-4">
+        <div className="bg-white/90 backdrop-blur-xl rounded-3xl shadow-2xl border border-white/20 p-8 max-w-lg w-full text-center">
+          <div className="w-16 h-16 bg-gradient-to-r from-yellow-500 to-orange-500 rounded-full flex items-center justify-center mx-auto mb-6">
+            <AlertCircle className="w-8 h-8 text-white" />
+          </div>
+          <h1 className="text-2xl font-bold text-gray-800 mb-4">Something Went Wrong</h1>
+          <p className="text-gray-600 mb-6">
+            We couldn&apos;t process your invitation. This might be a temporary issue.
+          </p>
+          <div className="space-y-3">
+            <button
+              onClick={handleRetry}
+              className="w-full px-6 py-3 bg-gradient-to-r from-blue-600 to-purple-600 text-white rounded-xl font-semibold hover:from-blue-700 hover:to-purple-700 transition-all duration-200 flex items-center justify-center"
+            >
+              <RefreshCw className="w-4 h-4 mr-2" />
+              Try Again
+            </button>
+            <button
+              onClick={() => router.push('/')}
+              className="w-full px-6 py-3 bg-gray-100 text-gray-700 rounded-xl font-semibold hover:bg-gray-200 transition-all duration-200"
+            >
+              Go to Home
+            </button>
+          </div>
         </div>
       </div>
     );
@@ -231,7 +414,7 @@ export default function JoinPage() {
             ) : joining ? (
               <div>
                 <div className="w-8 h-8 border-2 border-blue-500/30 border-t-blue-500 rounded-full animate-spin mx-auto mb-4"></div>
-                <p className="text-gray-600">Joining space...</p>
+                <p className="text-gray-600">{loadingMessage}</p>
               </div>
             ) : (
               <button
