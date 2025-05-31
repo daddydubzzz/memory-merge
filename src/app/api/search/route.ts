@@ -287,6 +287,83 @@ export async function POST(request: NextRequest) {
         }
       }
 
+      case 'test-censorship': {
+        // Test if OpenAI is censoring anatomical content in embeddings
+        console.log('🔍 TESTING OPENAI CENSORSHIP');
+        
+        try {
+          // Import OpenAI directly to test embedding generation
+          const OpenAI = (await import('openai')).default;
+          const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+          
+          // Test different variations
+          const testQueries = [
+            'nuts',
+            'testicle', 
+            'anatomical structure',
+            'body part',
+            'Walter nuts',
+            'Walter testicle',
+            'male anatomy nuts',
+            'reproductive anatomy'
+          ];
+          
+          const results = [];
+          
+          for (const query of testQueries) {
+            try {
+              console.log(`Testing embedding generation for: "${query}"`);
+              
+              const response = await openai.embeddings.create({
+                model: 'text-embedding-3-large',
+                input: query,
+                encoding_format: 'float',
+                dimensions: 1536,
+              });
+              
+              const embedding = response.data[0]?.embedding || [];
+              
+              results.push({
+                query,
+                success: true,
+                embeddingLength: embedding.length,
+                firstFewValues: embedding.slice(0, 5),
+                allZeros: embedding.every((val: number) => val === 0),
+                hasNaN: embedding.some((val: number) => isNaN(val))
+              });
+              
+            } catch (error) {
+              results.push({
+                query,
+                success: false,
+                error: error instanceof Error ? error.message : 'Unknown error'
+              });
+            }
+          }
+          
+          return NextResponse.json({
+            success: true,
+            censorshipTest: {
+              results,
+              summary: {
+                totalTests: testQueries.length,
+                successful: results.filter(r => r.success).length,
+                failed: results.filter(r => !r.success).length,
+                allZerosDetected: results.filter(r => r.success && r.allZeros).length
+              }
+            }
+          });
+          
+        } catch (error) {
+          return NextResponse.json({
+            success: false,
+            censorshipTest: {
+              error: error instanceof Error ? error.message : 'Unknown error'
+            }
+          });
+        }
+      }
+
       default:
         return NextResponse.json(
           { error: 'Invalid action. Use: search, recent, tags, or debug' },
