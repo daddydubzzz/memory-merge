@@ -427,13 +427,44 @@ export async function POST(request: NextRequest) {
           const testAccountId = 'iVjLBoNSrfYcHSsAEFEx';
           const testQuery = 'nuts';
           
-          const results: {
-            step1_vectorData: any;
-            step2_embedding: any;
-            step3_supabaseRaw: any;
-            step4_hydratedResults: any;
+          interface PipelineTestResults {
+            step1_vectorData: {
+              success: boolean;
+              error?: string;
+              count: number;
+              data?: Array<{
+                id: string;
+                firebase_doc_id: string;
+                enhanced_content_preview: string;
+              }>;
+            } | null;
+            step2_embedding: {
+              success: boolean;
+              error?: string;
+              embeddingLength?: number;
+              firstValues?: number[];
+              isValid?: boolean;
+            } | null;
+            step3_supabaseRaw: {
+              success: boolean;
+              error?: string;
+              rawDataCount?: number;
+              hasEmbeddings?: boolean;
+            } | null;
+            step4_hydratedResults: {
+              success: boolean;
+              error?: string;
+              resultCount?: number;
+              results?: Array<{
+                id: string;
+                similarity: number;
+                content: string;
+              }>;
+            } | null;
             errors: string[];
-          } = {
+          }
+          
+          const results: PipelineTestResults = {
             step1_vectorData: null,
             step2_embedding: null,
             step3_supabaseRaw: null,
@@ -494,7 +525,6 @@ export async function POST(request: NextRequest) {
           if (results.step2_embedding?.success) {
             try {
               const { supabase } = await import('@/lib/supabase');
-              const testEmbedding = new Array(1536).fill(0.1); // Simple test embedding
               
               const { data: rawData, error: rawError } = await supabase
                 .from('knowledge_vectors')
@@ -527,7 +557,7 @@ export async function POST(request: NextRequest) {
               success: true,
               resultCount: searchResults.length,
               results: searchResults.map(r => ({
-                id: r.id,
+                id: r.id || 'unknown',
                 similarity: r.similarity,
                 content: r.content?.substring(0, 50) + '...'
               }))
