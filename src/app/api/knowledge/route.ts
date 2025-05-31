@@ -4,43 +4,60 @@ import { storeWithEmbedding, updateWithEmbedding, deleteKnowledgeVector } from '
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
-    const { action, accountId, entry, id, updates } = body;
+    const { action, accountId, entry, updates, firebaseDocId, vectorId } = body;
 
     switch (action) {
       case 'store': {
-        if (!accountId || !entry) {
+        if (!accountId || !entry || !firebaseDocId) {
           return NextResponse.json(
-            { error: 'Missing required fields: accountId and entry' },
+            { error: 'Missing required fields: accountId, entry, and firebaseDocId' },
             { status: 400 }
           );
         }
 
-        const vectorId = await storeWithEmbedding(accountId, entry);
-        return NextResponse.json({ success: true, id: vectorId });
+        console.log(`🔄 API: Storing vector data for Firebase doc: ${firebaseDocId}`);
+        const vectorIdResult = await storeWithEmbedding(accountId, entry, firebaseDocId);
+        
+        return NextResponse.json({ 
+          success: true, 
+          id: vectorIdResult,
+          firebaseDocId: firebaseDocId,
+          message: 'Vector data stored successfully (Firebase document referenced)'
+        });
       }
 
       case 'update': {
-        if (!id || !updates) {
+        if (!vectorId || !updates) {
           return NextResponse.json(
-            { error: 'Missing required fields: id and updates' },
+            { error: 'Missing required fields: vectorId and updates' },
             { status: 400 }
           );
         }
 
-        await updateWithEmbedding(id, updates);
-        return NextResponse.json({ success: true });
+        console.log(`🔄 API: Updating vector: ${vectorId}${firebaseDocId ? ` (Firebase doc: ${firebaseDocId})` : ''}`);
+        await updateWithEmbedding(vectorId, updates, firebaseDocId);
+        
+        return NextResponse.json({ 
+          success: true,
+          message: 'Vector data updated successfully'
+        });
       }
 
       case 'delete': {
-        if (!id) {
+        if (!vectorId) {
           return NextResponse.json(
-            { error: 'Missing required field: id' },
+            { error: 'Missing required field: vectorId' },
             { status: 400 }
           );
         }
 
-        await deleteKnowledgeVector(id);
-        return NextResponse.json({ success: true });
+        console.log(`🔄 API: Deleting vector: ${vectorId}`);
+        await deleteKnowledgeVector(vectorId);
+        
+        return NextResponse.json({ 
+          success: true,
+          message: 'Vector data deleted successfully (Firebase document preserved)'
+        });
       }
 
       default:

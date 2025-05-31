@@ -195,8 +195,8 @@ export class KnowledgeSearchService {
           query: searchQuery,
           tags, // Pass tags for filtering
           options: {
-            matchThreshold: 0.3, // Lower threshold for expanded terms
-            matchCount: 30, // More results to account for expansion
+            matchThreshold: 0.6, // Higher threshold for better precision with 3-large
+            matchCount: 25, // More results to account for enhanced expansion and better filtering
             minResults: 3
           }
         });
@@ -325,40 +325,10 @@ export class KnowledgeSearchService {
     }
 
     try {
-      // Try efficient Supabase API first
-      try {
-        const result = await callSearchAPI('recent', {
-          accountId: this.accountId,
-          options: { limit: limitCount }
-        });
-
-        const entries: KnowledgeEntry[] = result.results.map((item: Record<string, unknown>) => ({
-          id: item.id as string,
-          content: item.content as string,
-          enhanced_content: item.enhanced_content as string | undefined,
-          tags: (item.tags as string[]) || [],
-          addedBy: item.addedBy as string,
-          addedByName: item.addedByName as string | undefined,
-          createdAt: new Date(item.createdAt as string),
-          updatedAt: new Date(item.updatedAt as string),
-          accountId: this.accountId,
-          // Map revision fields if they exist - properly handle potential undefined values
-          timestamp: item.timestamp as string | undefined,
-          replaces: item.replaces as string | undefined,
-          replaced_by: item.replaced_by as string | undefined,
-          intent: item.intent as string | undefined
-        }));
-
-        // Cache for 5 minutes
-        cache.set(cacheKey, entries, 5);
-        console.log('📚 Recent entries loaded from Supabase API');
-        return this.filterSupersededEntries(entries, includeSuperseded);
-
-      } catch (apiError) {
-        console.warn('Supabase API failed, falling back to Firestore:', apiError);
-      }
-
-      // Fallback to direct Firestore query
+      console.log('📚 KnowledgeSearchService: Loading recent entries directly from Firebase for better reliability');
+      
+      // Use direct Firestore query instead of problematic API route
+      // This avoids server-side permission issues
       const knowledgeRef = collection(db, 'knowledge');
       const q = query(
         knowledgeRef,
@@ -375,13 +345,15 @@ export class KnowledgeSearchService {
         updatedAt: doc.data().updatedAt?.toDate() || new Date(),
       })) as KnowledgeEntry[];
 
-      // Cache for 3 minutes (shorter for fallback)
-      cache.set(cacheKey, entries, 3);
-      console.log('📚 Recent entries loaded from Firestore fallback');
+      console.log(`📚 KnowledgeSearchService: Loaded ${entries.length} entries directly from Firebase`);
+
+      // Cache for 5 minutes
+      cache.set(cacheKey, entries, 5);
       
       return this.filterSupersededEntries(entries, includeSuperseded);
+      
     } catch (error) {
-      console.error('Error getting recent knowledge:', error);
+      console.error('💥 KnowledgeSearchService: Error getting recent knowledge:', error);
       return [];
     }
   }

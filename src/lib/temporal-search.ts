@@ -12,8 +12,13 @@ import {
   type TemporalInfo 
 } from './temporal-processor';
 
+// Import Firebase for hydrating results
+import { doc, getDoc, getDocs, collection, query, where, documentId } from 'firebase/firestore';
+import { db } from './firebase';
+import type { KnowledgeEntry } from './knowledge/types';
+
 /**
- * Enhanced vector search with temporal intelligence
+ * Enhanced vector search with temporal intelligence (optimized)
  */
 export async function searchWithTemporalAwareness(
   query: string,
@@ -29,7 +34,7 @@ export async function searchWithTemporalAwareness(
   } = options;
 
   try {
-    console.log(`🔍 Performing temporal-aware search for: "${query}"`);
+    console.log(`🔍 Performing temporal-aware search (optimized) for: "${query}"`);
     console.log(`🕒 Time frame: ${timeFrame}, temporal weight: ${temporalRelevanceWeight}`);
 
     // Process the query for temporal expressions
@@ -52,74 +57,40 @@ export async function searchWithTemporalAwareness(
     }
 
     if (!results || results.length === 0) {
-      console.log('📭 No results found');
+      console.log('📭 No temporal results found');
       return [];
     }
 
-    // Process and enhance results with temporal intelligence
-    const enhancedResults: VectorSearchResult[] = results.map((result: { 
-      id: string; 
-      content: string; 
-      enhanced_content?: string; 
-      processed_content?: string; 
-      tags: string[]; 
-      added_by: string; 
-      added_by_name?: string; 
-      created_at: string; 
-      updated_at: string; 
-      account_id: string; 
-      temporal_info?: TemporalInfo[]; 
-      resolved_dates?: string[]; 
-      temporal_relevance_score?: number; 
-      contains_temporal_refs?: boolean; 
-      similarity: number; 
-    }) => {
-      const temporalInfo: TemporalInfo[] = result.temporal_info || [];
-      const createdAt = new Date(result.created_at);
+    console.log(`🕒 Found ${results.length} temporal vector matches, hydrating from Firebase...`);
+
+    // Hydrate results by combining vector data (Supabase) + core data (Firebase)
+    const hydratedResults = await hydrateTemporalResults(results);
+    
+    if (hydratedResults.length === 0) {
+      console.log('⚠️ No results after hydration');
+      return [];
+    }
+
+    // Apply temporal processing to hydrated results
+    const enhancedResults: VectorSearchResult[] = hydratedResults.map(result => {
+      const temporalInfo: TemporalInfo[] = result.temporalInfo || [];
       
       // Calculate temporal relevance for this specific query
       const isRelevant = isTemporallyRelevant(temporalInfo, { 
         includeExpiredEvents, 
         timeFrame 
       });
-      
-      // Generate temporal context for AI responses
-      const temporalContext = temporalInfo.length > 0 
-        ? createTemporalContext(temporalInfo, createdAt)
-        : '';
-      
-      // Calculate next occurrence for recurring events
-      const recurringTemporal = temporalInfo.find(t => t.recurringPattern);
-      const nextOccurrence = recurringTemporal
-        ? getNextOccurrence(recurringTemporal)
-        : undefined;
 
       // Calculate combined score (semantic similarity + temporal relevance)
       const semanticScore = result.similarity;
-      const temporalScore = result.temporal_relevance_score || 0;
+      const temporalScore = result.temporalRelevanceScore || 0;
       const combinedScore = (semanticScore * (1 - temporalRelevanceWeight)) + 
                            (temporalScore * temporalRelevanceWeight);
 
       return {
         ...result,
-        id: result.id,
-        content: result.content,
-        enhanced_content: result.enhanced_content,
-        processed_content: result.processed_content,
-        tags: result.tags,
-        addedBy: result.added_by,
-        addedByName: result.added_by_name,
-        createdAt: createdAt,
-        updatedAt: new Date(result.updated_at),
-        accountId: result.account_id,
-        temporalInfo: temporalInfo,
-        resolvedDates: result.resolved_dates?.map((d: string) => new Date(d)) || [],
-        temporalRelevanceScore: temporalScore,
-        containsTemporalRefs: result.contains_temporal_refs,
         similarity: combinedScore, // Use combined score for sorting
-        temporalContext,
-        isTemporallyRelevant: isRelevant,
-        nextOccurrence
+        isTemporallyRelevant: isRelevant // Ensure this is always a boolean
       };
     });
 
@@ -138,7 +109,7 @@ export async function searchWithTemporalAwareness(
     // Sort by combined score (already calculated above)
     filteredResults.sort((a, b) => b.similarity - a.similarity);
 
-    console.log(`✅ Found ${filteredResults.length} temporally-relevant results`);
+    console.log(`✅ Found ${filteredResults.length} temporally-relevant results (optimized)`);
     console.log(`🕒 Temporal intent: ${temporalIntent}`);
     
     // Log temporal context for debugging
@@ -350,5 +321,127 @@ export async function updateTemporalRelevanceScores(accountId: string): Promise<
   } catch (error) {
     console.error('Error in updateTemporalRelevanceScores:', error);
     throw error;
+  }
+}
+
+/**
+ * Hydrate vector search results by fetching core data from Firebase
+ * (Duplicate of function in vector-search.ts to avoid circular imports)
+ */
+async function hydrateTemporalResults(vectorResults: {
+  id: string;
+  firebase_doc_id: string;
+  account_id: string;
+  enhanced_content?: string;
+  temporal_info?: TemporalInfo[];
+  resolved_dates?: string[];
+  temporal_relevance_score?: number;
+  contains_temporal_refs?: boolean;
+  created_at: string;
+  updated_at: string;
+  similarity: number;
+}[]): Promise<VectorSearchResult[]> {
+  if (vectorResults.length === 0) {
+    return [];
+  }
+
+  try {
+    // Get unique Firebase document IDs
+    const firebaseDocIds = [...new Set(vectorResults.map(r => r.firebase_doc_id))];
+    console.log(`🔗 Temporal search hydrating ${vectorResults.length} vector results from ${firebaseDocIds.length} Firebase documents`);
+
+    // Fetch Firebase documents in batch
+    const firebaseDocuments: Record<string, KnowledgeEntry> = {};
+    
+    if (firebaseDocIds.length === 1) {
+      // Single document fetch
+      const docRef = doc(db, 'knowledge', firebaseDocIds[0]);
+      const docSnap = await getDoc(docRef);
+      if (docSnap.exists()) {
+        firebaseDocuments[firebaseDocIds[0]] = {
+          id: docSnap.id,
+          ...docSnap.data(),
+          createdAt: docSnap.data().createdAt?.toDate() || new Date(),
+          updatedAt: docSnap.data().updatedAt?.toDate() || new Date(),
+        } as KnowledgeEntry;
+      }
+    } else {
+      // Batch document fetch
+      const q = query(
+        collection(db, 'knowledge'),
+        where(documentId(), 'in', firebaseDocIds)
+      );
+      const querySnapshot = await getDocs(q);
+      
+      querySnapshot.forEach((doc) => {
+        firebaseDocuments[doc.id] = {
+          id: doc.id,
+          ...doc.data(),
+          createdAt: doc.data().createdAt?.toDate() || new Date(),
+          updatedAt: doc.data().updatedAt?.toDate() || new Date(),
+        } as KnowledgeEntry;
+      });
+    }
+
+    console.log(`✅ Temporal search hydrated ${Object.keys(firebaseDocuments).length}/${firebaseDocIds.length} Firebase documents`);
+
+    // Combine vector and Firebase data
+    const hydratedResults: VectorSearchResult[] = vectorResults
+      .map(vectorResult => {
+        const firebaseDoc = firebaseDocuments[vectorResult.firebase_doc_id];
+        if (!firebaseDoc) {
+          console.warn(`⚠️ Firebase document not found: ${vectorResult.firebase_doc_id}`);
+          return null;
+        }
+
+        // Calculate temporal context
+        const temporalInfo: TemporalInfo[] = vectorResult.temporal_info || [];
+        const temporalContext = temporalInfo.length > 0 
+          ? createTemporalContext(temporalInfo, firebaseDoc.createdAt)
+          : '';
+
+        // Calculate next occurrence for recurring events
+        const recurringTemporal = temporalInfo.find(t => t.recurringPattern);
+        const nextOccurrence = recurringTemporal
+          ? getNextOccurrence(recurringTemporal)
+          : undefined;
+
+        return {
+          // Core data from Firebase (source of truth)
+          id: firebaseDoc.id,
+          content: firebaseDoc.content,
+          tags: firebaseDoc.tags,
+          addedBy: firebaseDoc.addedBy,
+          addedByName: firebaseDoc.addedByName,
+          createdAt: firebaseDoc.createdAt,
+          updatedAt: firebaseDoc.updatedAt,
+          accountId: firebaseDoc.accountId,
+          
+          // Vector and AI-specific data from Supabase
+          enhanced_content: vectorResult.enhanced_content,
+          temporalInfo: temporalInfo,
+          resolvedDates: vectorResult.resolved_dates?.map((d: string) => new Date(d)) || [],
+          temporalRelevanceScore: vectorResult.temporal_relevance_score || 0,
+          containsTemporalRefs: vectorResult.contains_temporal_refs || false,
+          similarity: vectorResult.similarity,
+          temporalContext,
+          isTemporallyRelevant: true,
+          nextOccurrence,
+          
+          // Additional Firebase fields if they exist
+          timestamp: firebaseDoc.timestamp,
+          replaces: firebaseDoc.replaces,
+          replaced_by: firebaseDoc.replaced_by,
+          intent: firebaseDoc.intent
+        } as VectorSearchResult;
+      })
+      .filter(result => result !== null);
+
+    return hydratedResults;
+
+  } catch (error) {
+    console.error('Error hydrating temporal search results:', error);
+    // Return empty results on hydration failure
+    return [];
   }
 } 

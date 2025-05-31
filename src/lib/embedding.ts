@@ -128,40 +128,58 @@ const SYNONYM_GROUPS = {
 /**
  * Enrich content with synonyms for better searchability
  */
-function enrichContentWithSynonyms(content: string): string {
+export function enrichContentWithSynonyms(content: string): string {
   let enrichedContent = content;
   const foundSynonyms: string[] = [];
+  const contextualTerms: string[] = [];
+  const allFoundGroups: string[][] = [];
   
-  for (const synonyms of Object.values(SYNONYM_GROUPS)) {
+  for (const [category, synonyms] of Object.entries(SYNONYM_GROUPS)) {
     for (const synonym of synonyms) {
       const regex = new RegExp(`\\b${synonym}\\b`, 'gi');
       if (regex.test(content)) {
-        // Add some related synonyms to the content (not all to avoid spam)
-        const relatedSynonyms = synonyms.filter(s => s !== synonym).slice(0, 3);
-        foundSynonyms.push(...relatedSynonyms);
-        console.log(`🔗 Found "${synonym}", adding related terms: [${relatedSynonyms.join(', ')}]`);
+        // Add ALL synonyms from this group for maximum connection strength
+        const allSynonyms = synonyms.filter(s => s !== synonym);
+        foundSynonyms.push(...allSynonyms);
+        allFoundGroups.push(synonyms);
+        
+        // Add semantic category context for better reasoning
+        const categoryName = category.replace(/([A-Z])/g, ' $1').toLowerCase().trim();
+        contextualTerms.push(`related to ${categoryName}`);
+        
+        console.log(`🔗 AGGRESSIVE MATCH: Found "${synonym}" (${categoryName}), adding ALL related terms: [${allSynonyms.join(', ')}]`);
         break; // Only process one match per group
       }
     }
   }
   
   if (foundSynonyms.length > 0) {
-    enrichedContent += ` [Related terms: ${foundSynonyms.join(', ')}]`;
+    // TRIPLE-STRENGTH enhancement for bulletproof matching
+    const uniqueSynonyms = [...new Set(foundSynonyms)];
+    
+    // Add synonyms in multiple formats for maximum vector density
+    enrichedContent += ` [Semantic context: ${contextualTerms.join(', ')}. Related terms: ${uniqueSynonyms.join(', ')}]`;
+    enrichedContent += ` [Synonyms: ${uniqueSynonyms.slice(0, 10).join(' ')}]`; // Additional synonym injection
+    enrichedContent += ` [Keywords: ${uniqueSynonyms.slice(0, 5).join(' • ')}]`; // Alternative format
+    
+    console.log(`🧠 BULLETPROOF ENHANCEMENT: +${uniqueSynonyms.length} unique terms across ${contextualTerms.length} categories`);
+    console.log(`📊 Enhanced content length: ${enrichedContent.length} chars (${((enrichedContent.length / content.length - 1) * 100).toFixed(1)}% increase)`);
   }
   
   return enrichedContent;
 }
 
 /**
- * Generate embedding for text using OpenAI's text-embedding-3-small model
+ * Generate embedding for text using OpenAI's text-embedding-3-large model
  */
 async function generateEmbedding(text: string): Promise<number[]> {
   try {
     const openai = createOpenAIClient();
     const response = await openai.embeddings.create({
-      model: 'text-embedding-3-small',
+      model: 'text-embedding-3-large',
       input: text.replace(/\n/g, ' '), // Clean newlines
       encoding_format: 'float',
+      dimensions: 1536,
     });
 
     // Validate response structure
@@ -179,7 +197,7 @@ async function generateEmbedding(text: string): Promise<number[]> {
 }
 
 /**
- * Store knowledge entry with its vector embedding in Supabase
+ * Store knowledge entry with its vector embedding in Supabase (optimized - no data duplication)
  * Enhanced with temporal intelligence and user context for superior search relevance
  */
 export async function storeWithEmbedding(
@@ -187,7 +205,8 @@ export async function storeWithEmbedding(
   entry: Omit<KnowledgeEntry, 'id' | 'createdAt' | 'updatedAt' | 'accountId'> & { 
     userTimezone?: string;
     clientStorageDate?: string; // ISO string from client in user's timezone
-  }
+  },
+  firebaseDocId: string // Reference to the Firebase document containing core data
 ): Promise<string> {
   try {
     // Use client-provided storage date (in user's timezone) if available
@@ -203,6 +222,7 @@ export async function storeWithEmbedding(
     console.log(`📅 Storage date: ${storageDate.toISOString()}`);
     console.log(`📅 Client storage date: ${entry.clientStorageDate || 'not provided'}`);
     console.log(`📅 User timezone: ${entry.userTimezone || 'not provided'}`);
+    console.log(`🔗 Firebase document ID: ${firebaseDocId}`);
     
     // Use provided display name or fall back to user lookup (with improved error handling)
     let userName = entry.addedByName;
@@ -263,18 +283,17 @@ export async function storeWithEmbedding(
     // Generate embedding with enriched content
     const embedding = await generateEmbedding(enhancedContent);
 
-    // Store in Supabase with all temporal metadata
+    // Store in Supabase with ONLY vector and AI-specific data (no duplication with Firebase)
     const { data, error } = await supabase
       .from('knowledge_vectors')
       .insert({
+        firebase_doc_id: firebaseDocId, // Reference to Firebase document
         account_id: accountId,
-        content: entry.content, // Original content for display
-        enhanced_content: enhancedContent, // Enhanced content that was embedded
-        processed_content: temporalInfo.processedContent, // Content with resolved temporal expressions
-        tags: entry.tags,
-        added_by: entry.addedBy,
-        added_by_name: userName, // Use the resolved or provided name
+        
+        // Vector and AI-specific fields only
         embedding: embedding,
+        enhanced_content: enhancedContent, // Enhanced content that was embedded
+        
         // Temporal intelligence fields
         temporal_info: temporalInfo.temporalInfo,
         resolved_dates: temporalInfo.resolvedDates,
@@ -301,6 +320,8 @@ export async function storeWithEmbedding(
       console.log(`✅ Stored embedding with user context for: ${userName}`);
     }
     
+    console.log(`💾 Optimization: Only vector data stored in Supabase, core data in Firebase (${firebaseDocId})`);
+    
     return data.id;
   } catch (error) {
     console.error('Error in storeWithEmbedding:', error);
@@ -309,17 +330,17 @@ export async function storeWithEmbedding(
 }
 
 /**
- * Update existing knowledge vector with new content and embedding
+ * Update existing knowledge vector with new content and embedding (optimized)
  * Enhanced with temporal intelligence and user context
  */
 export async function updateWithEmbedding(
-  id: string,
-  updates: { content?: string; tags?: string[] }
+  vectorId: string, // Supabase vector ID
+  updates: { content?: string; tags?: string[] },
+  firebaseDocId?: string // Firebase document ID (if updating reference)
 ): Promise<void> {
   try {
     let embedding: number[] | undefined;
     let enhancedContent: string | undefined;
-    let processedContent: string | undefined;
     let temporalData: Record<string, unknown> = {};
     
     // Generate new embedding if content changed
@@ -329,28 +350,30 @@ export async function updateWithEmbedding(
       console.log(`📅 Update date: ${updateDate.toISOString()}`);
       console.log(`📅 Local update date: ${updateDate.toLocaleDateString()} ${updateDate.toLocaleTimeString()}`);
       
-      // Get the existing entry to find out who added it
-      const { data: existingEntry, error: fetchError } = await supabase
+      // Get the existing vector entry
+      const { data: existingVector, error: fetchError } = await supabase
         .from('knowledge_vectors')
-        .select('added_by, added_by_name, created_at')
-        .eq('id', id)
+        .select('firebase_doc_id, created_at')
+        .eq('id', vectorId)
         .single();
         
       if (fetchError) {
-        console.error('Error fetching existing entry for update:', fetchError);
-        throw new Error(`Failed to fetch existing entry: ${fetchError.message}`);
+        console.error('Error fetching existing vector for update:', fetchError);
+        throw new Error(`Failed to fetch existing vector: ${fetchError.message}`);
       }
       
-      // Use cached name or fetch it if not available
-      const userName = existingEntry.added_by_name || await getUserDisplayName(existingEntry.added_by);
+      console.log(`🔗 Updating vector for Firebase doc: ${existingVector.firebase_doc_id}`);
+      
+      // Note: We no longer store user info in Supabase, so we'll need to fetch it from Firebase
+      // For now, use a generic context since the user info is in Firebase
+      const userContext = `Updated content`;
       
       // Process temporal content using the update date as reference
       console.log(`🕒 Processing updated temporal content: "${updates.content}"`);
       console.log(`🕒 Using temporal reference date: ${updateDate.toISOString()}`);
-      const temporalInfo = await processTemporalContent(updates.content, updateDate, new Date(existingEntry.created_at));
+      const temporalInfo = await processTemporalContent(updates.content, updateDate, new Date(existingVector.created_at));
       
       // Create enhanced content with temporal awareness
-      const userContext = `Added by ${userName}`;
       const updateContext = `on ${updateDate.toLocaleDateString('en-CA')}`; // YYYY-MM-DD format in local time
       const temporalContext = temporalInfo.containsTemporalRefs 
         ? `, referring to temporal events: ${temporalInfo.temporalInfo.map(t => 
@@ -358,8 +381,10 @@ export async function updateWithEmbedding(
           ).join(', ')}`
         : '';
       
-      enhancedContent = `${userContext} ${updateContext}: ${temporalInfo.processedContent}${temporalContext}`;
-      processedContent = temporalInfo.processedContent;
+      // Enrich content with synonyms for better searchability  
+      const synonymEnrichedContent = enrichContentWithSynonyms(temporalInfo.processedContent);
+      
+      enhancedContent = `${userContext} ${updateContext}: ${synonymEnrichedContent}${temporalContext}`;
       
       // Collect temporal data for update
       temporalData = {
@@ -369,29 +394,31 @@ export async function updateWithEmbedding(
         contains_temporal_refs: temporalInfo.containsTemporalRefs,
       };
       
-      console.log(`📝 Updating temporally-aware embedding for: ${userName}`);
+      console.log(`📝 Updating temporally-aware embedding`);
       console.log(`🧠 Updated enhanced content: ${enhancedContent.substring(0, 150)}...`);
       embedding = await generateEmbedding(enhancedContent);
     }
 
-    const updateData: Record<string, unknown> = { ...updates, ...temporalData };
+    const updateData: Record<string, unknown> = { ...temporalData };
     if (embedding) {
       updateData.embedding = embedding;
       updateData.enhanced_content = enhancedContent;
-      updateData.processed_content = processedContent;
+    }
+    if (firebaseDocId) {
+      updateData.firebase_doc_id = firebaseDocId;
     }
 
     const { error } = await supabase
       .from('knowledge_vectors')
       .update(updateData)
-      .eq('id', id);
+      .eq('id', vectorId);
 
     if (error) {
       console.error('Supabase update error:', error);
       throw new Error(`Failed to update embedding: ${error.message}`);
     }
     
-    console.log(`✅ Updated temporally-aware embedding`);
+    console.log(`✅ Updated temporally-aware embedding (vector ID: ${vectorId})`);
   } catch (error) {
     console.error('Error in updateWithEmbedding:', error);
     throw error;
@@ -399,19 +426,23 @@ export async function updateWithEmbedding(
 }
 
 /**
- * Delete knowledge vector by ID
+ * Delete knowledge vector by ID (optimized - only removes vector data)
  */
-export async function deleteKnowledgeVector(id: string): Promise<void> {
+export async function deleteKnowledgeVector(vectorId: string): Promise<void> {
   try {
+    console.log(`🗑️ Deleting vector: ${vectorId}`);
+    
     const { error } = await supabase
       .from('knowledge_vectors')
       .delete()
-      .eq('id', id);
+      .eq('id', vectorId);
 
     if (error) {
       console.error('Supabase delete error:', error);
       throw new Error(`Failed to delete knowledge vector: ${error.message}`);
     }
+    
+    console.log(`✅ Deleted vector: ${vectorId} (Firebase document remains)`);
   } catch (error) {
     console.error('Error in deleteKnowledgeVector:', error);
     throw error;
@@ -428,7 +459,7 @@ export async function batchGenerateEmbeddings(texts: string[]): Promise<number[]
     
     // OpenAI supports batch embedding requests
     const response = await openai.embeddings.create({
-      model: 'text-embedding-3-small',
+      model: 'text-embedding-3-large',
       input: texts.map(text => text.replace(/\n/g, ' ')),
       encoding_format: 'float',
     });

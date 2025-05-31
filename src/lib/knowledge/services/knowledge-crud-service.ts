@@ -59,7 +59,7 @@ export class KnowledgeCRUDService {
         timestamp: entry.timestamp || new Date().toISOString()
       };
 
-      console.log('🔄 Adding knowledge entry:', {
+      console.log('🔄 Adding knowledge entry (optimized flow):', {
         intent: entryWithDefaults.intent,
         content: entryWithDefaults.content,
         replaces: entryWithDefaults.replaces,
@@ -68,31 +68,33 @@ export class KnowledgeCRUDService {
         userTimezone: entryWithDefaults.userTimezone
       });
 
-      // Try to store with vector embedding first via API
+      // Step 1: Store core data in Firebase (primary data store)
+      const firebaseDocId = await this.addKnowledgeFirestore(entryWithDefaults);
+      console.log(`✅ Stored core data in Firebase: ${firebaseDocId}`);
+
+      // Step 2: Store vector and AI-specific data in Supabase with Firebase reference
       try {
-        const result = await callKnowledgeAPI('store', {
+        const vectorId = await callKnowledgeAPI('store', {
           accountId: this.accountId,
-          entry: entryWithDefaults
+          entry: entryWithDefaults,
+          firebaseDocId: firebaseDocId // Pass Firebase document ID
         });
         
-        console.log('Stored with vector embedding:', result.id);
-        
-        // Also store in Firestore for backup/compatibility
-        await this.addKnowledgeFirestore(entryWithDefaults);
+        console.log(`✅ Stored vector data in Supabase: ${vectorId} (references Firebase: ${firebaseDocId})`);
+        console.log(`💾 Optimization: Eliminated data duplication between Firebase and Supabase`);
         
         // Invalidate caches since we added new data
         cache.invalidatePattern(this.accountId);
         
-        return result.id;
+        return firebaseDocId; // Return Firebase document ID as primary reference
       } catch (vectorError) {
-        console.warn('Vector storage failed, using Firestore only:', vectorError);
-        // Fallback to Firestore only
-        const id = await this.addKnowledgeFirestore(entryWithDefaults);
+        console.warn('Vector storage failed, Firebase data preserved:', vectorError);
+        console.warn(`⚠️ Knowledge stored in Firebase (${firebaseDocId}) but vector search won't work until Supabase is fixed`);
         
         // Invalidate caches for fallback too
         cache.invalidatePattern(this.accountId);
         
-        return id;
+        return firebaseDocId; // Return Firebase ID even if vector storage fails
       }
     } catch (error) {
       console.error('Error adding knowledge:', error);

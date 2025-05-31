@@ -71,6 +71,12 @@ export async function getTagStats(accountId: string): Promise<Record<string, num
 
 // Get user display name by user ID
 export async function getUserDisplayName(userId: string): Promise<string> {
+  // Guard clause to handle undefined/null userId
+  if (!userId || typeof userId !== 'string') {
+    console.warn(`⚠️ getUserDisplayName called with invalid userId: ${userId}`);
+    return 'Unknown User';
+  }
+  
   console.log(`🔍 Looking up user: "${userId}" (length: ${userId.length})`);
   
   try {

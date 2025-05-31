@@ -47,10 +47,28 @@ export default function KnowledgeHub({ accountId, selectedTag, onClearTagFilter 
 
   // Load user names for entries
   const loadUserNames = useCallback(async (entries: KnowledgeEntry[]) => {
-    const uniqueUserIds = [...new Set(entries.map(entry => entry.addedBy))];
-    const userNamePromises = uniqueUserIds.map(async (userId) => {
-      const displayName = await getUserDisplayName(userId);
-      return { userId, displayName };
+    // Filter out entries with undefined or empty addedBy values
+    const validUserIds = [...new Set(
+      entries
+        .map(entry => entry.addedBy)
+        .filter(userId => userId && typeof userId === 'string' && userId.trim() !== '')
+    )];
+    
+    console.log(`👥 Loading user names for ${validUserIds.length} unique valid user IDs`);
+    
+    if (validUserIds.length === 0) {
+      console.log('⚠️ No valid user IDs found in entries');
+      return;
+    }
+    
+    const userNamePromises = validUserIds.map(async (userId) => {
+      try {
+        const displayName = await getUserDisplayName(userId);
+        return { userId, displayName };
+      } catch (error) {
+        console.error(`Error getting display name for user ${userId}:`, error);
+        return { userId, displayName: `User ${userId.substring(0, 8)}` };
+      }
     });
     
     const userNameResults = await Promise.all(userNamePromises);
@@ -60,11 +78,17 @@ export default function KnowledgeHub({ accountId, selectedTag, onClearTagFilter 
     }, {} as Record<string, string>);
     
     setUserNames(prev => ({ ...prev, ...userNameMap }));
+    console.log(`✅ Loaded user names for ${Object.keys(userNameMap).length} users`);
   }, []);
 
   const loadRecentEntries = useCallback(async () => {
+    console.log(`📚 Knowledge Hub: Loading recent entries for account: ${accountId}`);
+    console.log(`🔍 Knowledge Hub: Selected tags: [${selectedTags.join(', ')}]`);
+    
     try {
       const entries = await knowledgeService.getRecentKnowledge(100); // Load more for better tag calculation
+      console.log(`📊 Knowledge Hub: getRecentKnowledge returned ${entries.length} entries`);
+      
       setAllEntries(entries); // Store all entries for tag calculation
       
       // Filter entries based on selected tags (OR logic - show if entry has ANY of the selected tags)
@@ -72,38 +96,45 @@ export default function KnowledgeHub({ accountId, selectedTag, onClearTagFilter 
         ? entries.filter(entry => selectedTags.some(selectedTag => entry.tags.includes(selectedTag)))
         : entries.slice(0, 20); // Show only 20 for display if no filter
       
+      console.log(`📊 Knowledge Hub: After filtering, ${filteredEntries.length} entries to display`);
+      
       setRecentEntries(filteredEntries);
       // Load user names for these entries
       await loadUserNames(filteredEntries);
     } catch (error) {
-      console.error('Error loading entries:', error);
+      console.error('💥 Knowledge Hub: Error loading entries:', error);
     } finally {
       setIsLoading(false);
     }
-  }, [knowledgeService, loadUserNames, selectedTags]);
+  }, [knowledgeService, loadUserNames, selectedTags, accountId]);
 
   const performSearch = useCallback(async (query: string) => {
+    console.log(`🔍 Knowledge Hub: Performing search for query: "${query}", account: ${accountId}`);
+    
     if (!query.trim()) {
       // If no search query, load recent entries
+      console.log('📚 Knowledge Hub: No search query, loading recent entries');
       loadRecentEntries();
       return;
     }
     
     setIsLoading(true);
     try {
+      console.log(`🔍 Knowledge Hub: Searching with selectedTags: [${selectedTags.join(', ')}]`);
       const results = await knowledgeService.searchKnowledge(
         [query],
         selectedTags.length > 0 ? selectedTags : undefined
       );
+      console.log(`📊 Knowledge Hub: Search returned ${results.length} results`);
       setRecentEntries(results);
       // Load user names for search results
       await loadUserNames(results);
     } catch (error) {
-      console.error('Error searching:', error);
+      console.error('💥 Knowledge Hub: Error searching:', error);
     } finally {
       setIsLoading(false);
     }
-  }, [knowledgeService, selectedTags, loadRecentEntries, loadUserNames]);
+  }, [knowledgeService, selectedTags, loadRecentEntries, loadUserNames, accountId]);
 
   // Handle tag selection
   const handleTagSelect = useCallback((tag: string) => {
@@ -305,7 +336,12 @@ export default function KnowledgeHub({ accountId, selectedTag, onClearTagFilter 
             ) : (
               <div className="space-y-4">
                 {recentEntries.map((entry) => (
-                  <KnowledgeCard key={entry.id} entry={entry} searchQuery={searchTerm} userName={userNames[entry.addedBy] || 'Loading...'} />
+                  <KnowledgeCard 
+                    key={entry.id} 
+                    entry={entry} 
+                    searchQuery={searchTerm} 
+                    userName={entry.addedBy ? (userNames[entry.addedBy] || 'Loading...') : 'Unknown User'} 
+                  />
                 ))}
                 {recentEntries.length === 0 && (
                   <div className="text-center py-16">
