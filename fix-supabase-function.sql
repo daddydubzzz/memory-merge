@@ -1,11 +1,11 @@
--- Fix Supabase function signature mismatch
--- This script updates the match_knowledge_vectors function to match the current codebase
+-- Fix Supabase function signature mismatch - FINAL VERSION
+-- This script updates the match_knowledge_vectors function to match the current codebase exactly
 
 -- Drop any existing versions of the function
 DROP FUNCTION IF EXISTS match_knowledge_vectors(vector, text, double precision, integer);
 DROP FUNCTION IF EXISTS match_knowledge_vectors(vector, text, double precision, integer, boolean, double precision);
 
--- Create the correct function that matches our TypeScript interface
+-- Create the correct function that matches our TypeScript interface exactly
 CREATE OR REPLACE FUNCTION match_knowledge_vectors(
   query_embedding vector(1536),
   account_id text,
@@ -51,14 +51,19 @@ BEGIN
       OR kv.contains_temporal_refs = false
     )
   ORDER BY 
-    -- Boost temporal relevance in sorting
-    (
-      (kv.embedding <#> query_embedding) * -1 * 0.7 + 
-      COALESCE(kv.temporal_relevance_score, 0) * 0.3
-    ) DESC
+    -- Simple similarity ordering
+    (kv.embedding <#> query_embedding) * -1 DESC
   LIMIT match_count;
 END;
 $$;
 
 -- Grant necessary permissions
-GRANT EXECUTE ON FUNCTION match_knowledge_vectors TO anon, authenticated; 
+GRANT EXECUTE ON FUNCTION match_knowledge_vectors TO anon, authenticated;
+
+-- Test the function to make sure it works
+SELECT match_knowledge_vectors(
+  ARRAY[0.1, 0.2, 0.3]::vector(3)::vector(1536), -- Dummy embedding
+  'test-account',
+  0.0,
+  1
+); 

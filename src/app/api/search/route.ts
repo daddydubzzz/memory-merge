@@ -364,6 +364,61 @@ export async function POST(request: NextRequest) {
         }
       }
 
+      case 'test-schema': {
+        // Test what columns actually exist in the knowledge_vectors table
+        console.log('🔍 TESTING SUPABASE TABLE SCHEMA');
+        
+        try {
+          const { supabase } = await import('@/lib/supabase');
+          
+          // Try to get a single row to see what columns exist
+          const { data, error } = await supabase
+            .from('knowledge_vectors')
+            .select('*')
+            .limit(1)
+            .single();
+          
+          if (error) {
+            console.log('Schema test error:', error);
+            return NextResponse.json({
+              success: false,
+              schemaTest: {
+                error: error.message,
+                hint: error.hint || null
+              }
+            });
+          }
+          
+          // Get the column names from the returned data
+          const columnNames = data ? Object.keys(data) : [];
+          
+          return NextResponse.json({
+            success: true,
+            schemaTest: {
+              hasData: !!data,
+              columnCount: columnNames.length,
+              columnNames: columnNames.sort(),
+              sampleData: data ? {
+                id: data.id,
+                account_id: data.account_id,
+                firebase_doc_id: data.firebase_doc_id,
+                enhanced_content_length: data.enhanced_content?.length,
+                has_embedding: !!data.embedding,
+                embedding_length: Array.isArray(data.embedding) ? data.embedding.length : 'Not array'
+              } : null
+            }
+          });
+          
+        } catch (error) {
+          return NextResponse.json({
+            success: false,
+            schemaTest: {
+              error: error instanceof Error ? error.message : 'Unknown error'
+            }
+          });
+        }
+      }
+
       default:
         return NextResponse.json(
           { error: 'Invalid action. Use: search, recent, tags, or debug' },
