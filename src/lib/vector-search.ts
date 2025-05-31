@@ -27,15 +27,153 @@ const EmbeddingResponseSchema = z.object({
   }))
 });
 
+// Synonym mapping for query expansion (same as in embedding.ts and knowledge-search-service.ts)
+const SYNONYM_GROUPS = {
+  // Anatomical terms (male)
+  testicles: [
+    'balls', 'nuts', 'testicles', 'testicle', 'sack', 'ballsack', 'nutsack',
+    'family jewels', 'nads', 'gonads', 'stones', 'plums', 'rocks', 'eggs',
+    'cojones', 'bollocks', 'beans'
+  ],
+
+  // Anatomical terms (male)
+  penis: [
+    'dick', 'cock', 'penis', 'johnson', 'prick', 'dong', 'wang', 'tool',
+    'member', 'shaft', 'rod', 'pecker', 'stick', 'phallus', 'meat',
+    'package', 'junk', 'manhood'
+  ],
+
+  // Anatomical terms (female)
+  vagina: [
+    'pussy', 'vagina', 'cooch', 'coochie', 'kitty', 'snatch', 'vajayjay',
+    'beaver', 'hoo-ha', 'fanny', 'flower', 'lady bits', 'cunt'
+  ],
+
+  // Anatomical terms (general)
+  breasts: [
+    'boobs', 'tits', 'breasts', 'boob', 'titties', 'rack', 'melons',
+    'knockers', 'chest', 'girls', 'jugs', 'assets', 'hooters', 'bust',
+    'bosom'
+  ],
+
+  // Anatomical terms (general)
+  buttocks: [
+    'ass', 'butt', 'booty', 'buttocks', 'cheeks', 'rear', 'behind',
+    'bottom', 'glutes', 'bum', 'rump', 'arse', 'derriere'
+  ],
+
+  // Anatomical terms (general)
+  anus: [
+    'asshole', 'anus', 'butthole', 'arsehole', 'brown eye', 'backdoor',
+    'starfish'
+  ],
+
+  // Sexual activity
+  sex: [
+    'sex', 'hook up', 'bang', 'smash', 'get laid', 'bone', 'score',
+    'screw', 'do it', 'make love', 'shag', 'get busy', 'fool around',
+    'get it on', 'ride'
+  ],
+
+  // Money & payments
+  money: [
+    'money', 'cash', 'bucks', 'dollars', 'bread', 'cheddar', 'dough',
+    'moolah', 'loot', 'stacks', 'green', 'paper', 'bands', 'cream',
+    'scratch', 'bank', 'dinero'
+  ],
+
+  // Vehicles
+  car: [
+    'car', 'ride', 'wheels', 'vehicle', 'whip', 'auto', 'motor',
+    'beater', 'hoopty', 'set of wheels'
+  ],
+
+  // Housing
+  house: [
+    'house', 'home', 'crib', 'pad', 'place', 'spot', 'diggs', 'dwelling',
+    'residence'
+  ],
+
+  // Alcohol
+  alcohol: [
+    'booze', 'drinks', 'alcohol', 'liquor', 'beer', 'brew', 'shots',
+    'spirits', 'vino', 'wine', 'hooch', 'bevvies'
+  ],
+
+  // Intoxication (alcohol)
+  drunk: [
+    'drunk', 'wasted', 'hammered', 'sloshed', 'plastered', 'smashed',
+    'lit', 'buzzed', 'tipsy', 'blitzed', 'tanked'
+  ],
+
+  // Cannabis
+  marijuana: [
+    'weed', 'pot', 'marijuana', 'ganja', 'herb', 'grass', 'bud',
+    'mary jane', 'chronic', 'loud', 'reefer', 'dope', 'greenery'
+  ],
+
+  // Cocaine
+  cocaine: [
+    'coke', 'blow', 'cocaine', 'snow', 'powder', 'nose candy', 'white',
+    'yayo', 'charlie'
+  ],
+
+  // Law enforcement
+  police: [
+    'cops', 'police', 'cop', 'five-o', 'po-po', 'law', 'heat', 'fuzz',
+    'boys in blue', 'pigs'
+  ],
+
+  // Friends & acquaintances
+  friend: [
+    'friend', 'buddy', 'pal', 'homie', 'bro', 'dude', 'mate', 'amigo',
+    'compadre', 'ace', 'partner-in-crime'
+  ]
+};
+
 /**
- * Generate embedding for search query
+ * Expand search query with synonyms for better vector similarity
+ */
+function expandQueryWithSynonyms(query: string): string {
+  let expandedQuery = query;
+  const foundSynonyms: string[] = [];
+  
+  const queryLower = query.toLowerCase();
+  
+  for (const synonyms of Object.values(SYNONYM_GROUPS)) {
+    for (const synonym of synonyms) {
+      // Use word boundaries to avoid partial matches
+      const regex = new RegExp(`\\b${synonym}\\b`, 'gi');
+      if (regex.test(queryLower)) {
+        // Add some related synonyms to the query (not all to avoid overwhelming the embedding)
+        const relatedSynonyms = synonyms.filter(s => s !== synonym).slice(0, 4);
+        foundSynonyms.push(...relatedSynonyms);
+        console.log(`🔗 Found "${synonym}" in query, adding related terms: [${relatedSynonyms.join(', ')}]`);
+        break; // Only process one match per group
+      }
+    }
+  }
+  
+  if (foundSynonyms.length > 0) {
+    expandedQuery += ` ${foundSynonyms.join(' ')}`;
+    console.log(`🔍 Expanded query: "${query}" → "${expandedQuery}"`);
+  }
+  
+  return expandedQuery;
+}
+
+/**
+ * Generate embedding for search query with synonym expansion
  */
 async function generateQueryEmbedding(query: string): Promise<number[]> {
   try {
+    // Expand query with synonyms before generating embedding
+    const expandedQuery = expandQueryWithSynonyms(query);
+    
     const openai = createOpenAIClient();
     const response = await openai.embeddings.create({
       model: 'text-embedding-3-small',
-      input: query.replace(/\n/g, ' '), // Clean newlines
+      input: expandedQuery.replace(/\n/g, ' '), // Clean newlines
       encoding_format: 'float',
     });
 
