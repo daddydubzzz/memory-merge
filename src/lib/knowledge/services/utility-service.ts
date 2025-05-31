@@ -71,18 +71,62 @@ export async function getTagStats(accountId: string): Promise<Record<string, num
 
 // Get user display name by user ID
 export async function getUserDisplayName(userId: string): Promise<string> {
+  console.log(`🔍 Looking up user: "${userId}" (length: ${userId.length})`);
+  
   try {
+    // First try the users collection (legacy/primary location)
+    console.log('🔍 Checking users collection...');
     const userRef = doc(db, 'users', userId);
     const userSnap = await getDoc(userRef);
     
     if (userSnap.exists()) {
       const userData = userSnap.data();
-      return userData.displayName || userData.email?.split('@')[0] || 'Unknown User';
+      console.log('✅ Found user in users collection:', {
+        hasDisplayName: !!userData.displayName,
+        hasEmail: !!userData.email,
+        displayName: userData.displayName,
+        email: userData.email
+      });
+      
+      const displayName = userData.displayName || userData.email?.split('@')[0];
+      if (displayName) {
+        console.log(`✅ Returning displayName from users: "${displayName}"`);
+        return displayName;
+      }
     } else {
-      return 'Unknown User';
+      console.log('❌ User not found in users collection');
     }
+    
+    // Fallback to userProfiles collection
+    console.log('🔍 Checking userProfiles collection...');
+    const profileRef = doc(db, 'userProfiles', userId);
+    const profileSnap = await getDoc(profileRef);
+    
+    if (profileSnap.exists()) {
+      const profileData = profileSnap.data();
+      console.log('✅ Found user in userProfiles collection:', {
+        hasDisplayName: !!profileData.displayName,
+        hasEmail: !!profileData.email,
+        displayName: profileData.displayName,
+        email: profileData.email
+      });
+      
+      const displayName = profileData.displayName || profileData.email?.split('@')[0];
+      if (displayName) {
+        console.log(`✅ Returning displayName from userProfiles: "${displayName}"`);
+        return displayName;
+      }
+    } else {
+      console.log('❌ User not found in userProfiles collection');
+    }
+    
+    // Final fallback - create a readable name from the user ID
+    console.warn(`❌ No display name found for user ${userId}, using fallback`);
+    console.log('💡 Tip: Check if the user ID is correct and the user exists in Firestore');
+    return `User ${userId.substring(0, 8)}`;
+    
   } catch (error) {
-    console.error('Error fetching user:', error);
-    return 'Unknown User';
+    console.error('💥 Error fetching user:', error);
+    return `User ${userId.substring(0, 8)}`;
   }
 } 

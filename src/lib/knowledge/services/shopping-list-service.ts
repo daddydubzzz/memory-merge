@@ -71,9 +71,11 @@ export class ShoppingListService {
   // Handle item purchase - mark matching shopping list items as purchased
   async handleItemPurchase(
     purchasedItems: string[], 
-    tags: string[], 
+    tags: string[],
+    userId: string,
     addKnowledgeFn: (entry: Omit<KnowledgeEntry, 'id' | 'createdAt' | 'updatedAt' | 'accountId'>) => Promise<string>,
-    updateKnowledgeFn: (id: string, updates: Partial<KnowledgeEntry>) => Promise<void>
+    updateKnowledgeFn: (id: string, updates: Partial<KnowledgeEntry>) => Promise<void>,
+    userDisplayName?: string
   ): Promise<void> {
     try {
       console.log(`🛒 Processing purchase of items:`, purchasedItems);
@@ -151,6 +153,7 @@ export class ShoppingListService {
               content: remainingContent,
               tags: entry.tags.filter(tag => !['purchased', 'cleared'].includes(tag)), // Keep original tags but remove purchase/clear tags
               addedBy: entry.addedBy,
+              addedByName: entry.addedByName, // Preserve original user info
               intent: 'create',
               items: remainingItems,
               listType: entry.listType || 'shopping',
@@ -164,11 +167,12 @@ export class ShoppingListService {
         }
       }
 
-      // Store the purchase record
+      // Store the purchase record with actual user info
       await addKnowledgeFn({
         content: `Purchased ${purchasedItems.join(', ')}`,
         tags: ['shopping', 'purchased', ...tags.filter(tag => !['shopping', 'purchased'].includes(tag))],
-        addedBy: 'system', // This should be updated to use actual user
+        addedBy: userId,
+        addedByName: userDisplayName,
         intent: 'purchase',
         items: purchasedItems,
         timestamp: timestamp
@@ -183,9 +187,11 @@ export class ShoppingListService {
 
   // Clear shopping list - mark all active shopping list items as inactive
   async clearShoppingList(
-    listType: string, 
+    listType: string,
+    userId: string,
     addKnowledgeFn: (entry: Omit<KnowledgeEntry, 'id' | 'createdAt' | 'updatedAt' | 'accountId'>) => Promise<string>,
-    updateKnowledgeFn: (id: string, updates: Partial<KnowledgeEntry>) => Promise<void>
+    updateKnowledgeFn: (id: string, updates: Partial<KnowledgeEntry>) => Promise<void>,
+    userDisplayName?: string
   ): Promise<void> {
     try {
       console.log(`🗑️ Clearing ${listType} list`);
@@ -221,11 +227,12 @@ export class ShoppingListService {
         }
       }
 
-      // Store the clear list record
+      // Store the clear list record with actual user info
       await addKnowledgeFn({
         content: `Cleared ${listType} list`,
         tags: [listType, 'cleared'],
-        addedBy: 'system', // This should be updated to use actual user
+        addedBy: userId,
+        addedByName: userDisplayName,
         intent: 'clear_list',
         listType: listType,
         timestamp: timestamp

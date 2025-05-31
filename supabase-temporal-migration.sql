@@ -7,6 +7,8 @@ ALTER TABLE knowledge_vectors ADD COLUMN IF NOT EXISTS resolved_dates JSONB;
 ALTER TABLE knowledge_vectors ADD COLUMN IF NOT EXISTS temporal_relevance_score FLOAT DEFAULT 0;
 ALTER TABLE knowledge_vectors ADD COLUMN IF NOT EXISTS contains_temporal_refs BOOLEAN DEFAULT FALSE;
 ALTER TABLE knowledge_vectors ADD COLUMN IF NOT EXISTS processed_content TEXT;
+ALTER TABLE knowledge_vectors ADD COLUMN IF NOT EXISTS added_by_name TEXT;
+ALTER TABLE knowledge_vectors ADD COLUMN IF NOT EXISTS enhanced_content TEXT;
 
 -- Create indexes for efficient temporal queries
 CREATE INDEX IF NOT EXISTS idx_knowledge_vectors_temporal 

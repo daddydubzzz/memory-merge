@@ -3,7 +3,7 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { Send, MessageCircle, Sparkles } from 'lucide-react';
 import { useAuth } from '@/contexts/AuthContext';
-import { KnowledgeService } from '@/lib/knowledge';
+import { KnowledgeService, getUserDisplayName } from '@/lib/knowledge';
 import type { KnowledgeEntry } from '@/lib/knowledge/types';
 
 interface Message {
@@ -25,9 +25,20 @@ export default function ChatInterface({ accountId }: ChatInterfaceProps) {
   const [messages, setMessages] = useState<Message[]>([]);
   const [inputValue, setInputValue] = useState('');
   const [isLoading, setIsLoading] = useState(false);
+  const [userDisplayName, setUserDisplayName] = useState<string>('');
   
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const knowledgeService = new KnowledgeService(accountId);
+  
+  // Get user display name when component mounts or user changes
+  useEffect(() => {
+    if (user) {
+      getUserDisplayName(user.uid).then(name => {
+        console.log(`👤 Client-side resolved user name: "${name}"`);
+        setUserDisplayName(name);
+      });
+    }
+  }, [user]);
   
   // Auto-scroll to bottom when new messages arrive
   useEffect(() => {
@@ -66,7 +77,12 @@ export default function ChatInterface({ accountId }: ChatInterfaceProps) {
         // Handle shopping list operations
         if (processedQuery.intent === 'purchase') {
           // Mark items as purchased (remove from shopping list)
-          await knowledgeService.handleItemPurchase(processedQuery.items || [], processedQuery.tags);
+          await knowledgeService.handleItemPurchase(
+            processedQuery.items || [], 
+            processedQuery.tags,
+            user.uid,
+            userDisplayName
+          );
           
           const items = processedQuery.items || [];
           const botMessage: Message = {
@@ -84,7 +100,11 @@ export default function ChatInterface({ accountId }: ChatInterfaceProps) {
           
         } else if (processedQuery.intent === 'clear_list') {
           // Clear entire list
-          await knowledgeService.clearShoppingList(processedQuery.listType || 'shopping');
+          await knowledgeService.clearShoppingList(
+            processedQuery.listType || 'shopping',
+            user.uid,
+            userDisplayName
+          );
           
           const listType = processedQuery.listType || 'shopping';
           const botMessage: Message = {
@@ -106,6 +126,7 @@ export default function ChatInterface({ accountId }: ChatInterfaceProps) {
             content: processedQuery.content,
             tags: processedQuery.tags,
             addedBy: user.uid,
+            addedByName: userDisplayName, // Pass the resolved display name
             // Pass revision fields for updates
             intent: processedQuery.intent,
             replaces: processedQuery.replaces,
@@ -187,14 +208,14 @@ export default function ChatInterface({ accountId }: ChatInterfaceProps) {
       console.error('Error processing message:', error);
       const errorMessage: Message = {
         id: (Date.now() + 1).toString(),
-        content: "Sorry, I had trouble processing that. Could you try rephrasing your question?",
+        content: 'Sorry, I encountered an error processing your message. Please try again.',
         isUser: false,
         timestamp: new Date(),
       };
       setMessages(prev => [...prev, errorMessage]);
+    } finally {
+      setIsLoading(false);
     }
-
-    setIsLoading(false);
   };
 
   return (

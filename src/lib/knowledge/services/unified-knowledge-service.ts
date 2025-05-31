@@ -73,20 +73,24 @@ export class UnifiedKnowledgeService {
     return this.shoppingService.getActiveShoppingList();
   }
 
-  async handleItemPurchase(purchasedItems: string[], tags: string[]): Promise<void> {
+  async handleItemPurchase(purchasedItems: string[], tags: string[], userId: string, userDisplayName?: string): Promise<void> {
     return this.shoppingService.handleItemPurchase(
       purchasedItems, 
-      tags, 
+      tags,
+      userId,
       this.addKnowledge.bind(this), 
-      this.updateKnowledge.bind(this)
+      this.updateKnowledge.bind(this),
+      userDisplayName
     );
   }
 
-  async clearShoppingList(listType: string): Promise<void> {
+  async clearShoppingList(listType: string, userId: string, userDisplayName?: string): Promise<void> {
     return this.shoppingService.clearShoppingList(
-      listType, 
+      listType,
+      userId,
       this.addKnowledge.bind(this), 
-      this.updateKnowledge.bind(this)
+      this.updateKnowledge.bind(this),
+      userDisplayName
     );
   }
 

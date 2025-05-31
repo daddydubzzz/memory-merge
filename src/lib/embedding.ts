@@ -56,30 +56,53 @@ export async function storeWithEmbedding(
   entry: Omit<KnowledgeEntry, 'id' | 'createdAt' | 'updatedAt' | 'accountId'>
 ): Promise<string> {
   try {
-    const currentDate = new Date();
+    // IMPORTANT: Use the actual time when the entry was created
+    // This represents when the user actually added the information
+    const storageDate = new Date();
     
-    // Get the user's display name for user context
-    const userName = await getUserDisplayName(entry.addedBy);
+    // For temporal processing, use the same date to ensure consistency
+    // This ensures "tomorrow" gets resolved relative to when the user said it
+    const temporalReferenceDate = storageDate;
+    
+    console.log(`📅 Storage date: ${storageDate.toISOString()}`);
+    console.log(`📅 Local storage date: ${storageDate.toLocaleDateString()} ${storageDate.toLocaleTimeString()}`);
+    
+    // Use provided display name or fall back to user lookup (with improved error handling)
+    let userName = entry.addedByName;
+    if (!userName) {
+      console.log(`⚠️ No addedByName provided, attempting server-side lookup for ${entry.addedBy}`);
+      try {
+        userName = await getUserDisplayName(entry.addedBy);
+        console.log(`👤 Server-side resolved user name for ${entry.addedBy}: "${userName}"`);
+      } catch (error) {
+        console.warn(`❌ Server-side user lookup failed for ${entry.addedBy}:`, error);
+        userName = `User ${entry.addedBy.substring(0, 8)}`;
+      }
+    } else {
+      console.log(`👤 Using provided user name: "${userName}"`);
+    }
     
     // Process temporal content to extract and resolve temporal expressions
     console.log(`🕒 Processing temporal content: "${entry.content}"`);
-    const temporalInfo = await processTemporalContent(entry.content, currentDate);
+    console.log(`🕒 Using temporal reference date: ${temporalReferenceDate.toISOString()}`);
+    const temporalInfo = await processTemporalContent(entry.content, temporalReferenceDate);
     
     // Create multi-layered enhanced content for embedding:
     // 1. User context: "Added by John: ..."
-    // 2. Temporal context: "Stored on 2024-01-15, refers to 2024-01-16: ..."
+    // 2. Storage context: "Stored on 2024-01-15, refers to 2024-01-16: ..."
     // 3. Original content: "remind my wife there's a birthday party tomorrow"
     // 4. Processed content: "remind my wife there's a birthday party tomorrow (Tuesday, January 16, 2024)"
     
     const userContext = `Added by ${userName}`;
-    const dateContext = `on ${currentDate.toISOString().split('T')[0]}`;
+    // Use the actual storage date for context, not the temporal reference date
+    const storageContext = `on ${storageDate.toLocaleDateString('en-CA')}`; // YYYY-MM-DD format in local time
     const temporalContext = temporalInfo.containsTemporalRefs 
       ? `, referring to temporal events: ${temporalInfo.temporalInfo.map(t => 
           `"${t.originalText}" (${t.resolvedDate?.toLocaleDateString() || 'unresolved'})`
         ).join(', ')}`
       : '';
     
-    const enhancedContent = `${userContext} ${dateContext}: ${temporalInfo.processedContent}${temporalContext}`;
+    const enhancedContent = `${userContext} ${storageContext}: ${temporalInfo.processedContent}${temporalContext}`;
     
     console.log(`📝 Creating temporally-aware embedding for: ${userName}`);
     console.log(`🧠 Enhanced content: ${enhancedContent.substring(0, 150)}...`);
@@ -97,7 +120,7 @@ export async function storeWithEmbedding(
         processed_content: temporalInfo.processedContent, // Content with resolved temporal expressions
         tags: entry.tags,
         added_by: entry.addedBy,
-        added_by_name: userName,
+        added_by_name: userName, // Use the resolved or provided name
         embedding: embedding,
         // Temporal intelligence fields
         temporal_info: temporalInfo.temporalInfo,
@@ -120,6 +143,7 @@ export async function storeWithEmbedding(
     if (temporalInfo.containsTemporalRefs) {
       console.log(`✅ Stored temporally-aware embedding for: ${userName}`);
       console.log(`🕒 Temporal refs: ${temporalInfo.temporalInfo.length}, relevance: ${temporalInfo.temporalRelevanceScore.toFixed(2)}`);
+      console.log(`🕒 Resolved dates: ${temporalInfo.resolvedDates.map(d => d.toLocaleDateString()).join(', ')}`);
     } else {
       console.log(`✅ Stored embedding with user context for: ${userName}`);
     }
@@ -147,7 +171,10 @@ export async function updateWithEmbedding(
     
     // Generate new embedding if content changed
     if (updates.content) {
-      const currentDate = new Date();
+      const updateDate = new Date();
+      
+      console.log(`📅 Update date: ${updateDate.toISOString()}`);
+      console.log(`📅 Local update date: ${updateDate.toLocaleDateString()} ${updateDate.toLocaleTimeString()}`);
       
       // Get the existing entry to find out who added it
       const { data: existingEntry, error: fetchError } = await supabase
@@ -164,20 +191,21 @@ export async function updateWithEmbedding(
       // Use cached name or fetch it if not available
       const userName = existingEntry.added_by_name || await getUserDisplayName(existingEntry.added_by);
       
-      // Process temporal content
+      // Process temporal content using the update date as reference
       console.log(`🕒 Processing updated temporal content: "${updates.content}"`);
-      const temporalInfo = await processTemporalContent(updates.content, currentDate, new Date(existingEntry.created_at));
+      console.log(`🕒 Using temporal reference date: ${updateDate.toISOString()}`);
+      const temporalInfo = await processTemporalContent(updates.content, updateDate, new Date(existingEntry.created_at));
       
       // Create enhanced content with temporal awareness
       const userContext = `Added by ${userName}`;
-      const dateContext = `on ${currentDate.toISOString().split('T')[0]}`;
+      const updateContext = `on ${updateDate.toLocaleDateString('en-CA')}`; // YYYY-MM-DD format in local time
       const temporalContext = temporalInfo.containsTemporalRefs 
         ? `, referring to temporal events: ${temporalInfo.temporalInfo.map(t => 
             `"${t.originalText}" (${t.resolvedDate?.toLocaleDateString() || 'unresolved'})`
           ).join(', ')}`
         : '';
       
-      enhancedContent = `${userContext} ${dateContext}: ${temporalInfo.processedContent}${temporalContext}`;
+      enhancedContent = `${userContext} ${updateContext}: ${temporalInfo.processedContent}${temporalContext}`;
       processedContent = temporalInfo.processedContent;
       
       // Collect temporal data for update
@@ -189,6 +217,7 @@ export async function updateWithEmbedding(
       };
       
       console.log(`📝 Updating temporally-aware embedding for: ${userName}`);
+      console.log(`🧠 Updated enhanced content: ${enhancedContent.substring(0, 150)}...`);
       embedding = await generateEmbedding(enhancedContent);
     }
 

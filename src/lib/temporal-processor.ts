@@ -383,6 +383,7 @@ export function isTemporallyRelevant(
 /**
  * Create temporal context for AI responses
  */
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
 export function createTemporalContext(temporalInfo: TemporalInfo[], storageDate: Date): string {
   if (temporalInfo.length === 0) {
     return '';
@@ -393,19 +394,38 @@ export function createTemporalContext(temporalInfo: TemporalInfo[], storageDate:
   
   for (const temporal of temporalInfo) {
     if (temporal.resolvedDate) {
-      const diffDays = Math.floor((temporal.resolvedDate.getTime() - currentDate.getTime()) / (1000 * 60 * 60 * 24));
-      const storageDiffDays = Math.floor((currentDate.getTime() - storageDate.getTime()) / (1000 * 60 * 60 * 24));
+      const resolvedDateStr = temporal.resolvedDate.toLocaleDateString('en-US', { 
+        weekday: 'long', 
+        year: 'numeric', 
+        month: 'long', 
+        day: 'numeric' 
+      });
       
-      let contextStr = `"${temporal.originalText}" was stored ${storageDiffDays} days ago and resolved to ${temporal.resolvedDate.toLocaleDateString()}`;
+      // Calculate how many days from NOW to the resolved date
+      const daysFromNow = Math.ceil((temporal.resolvedDate.getTime() - currentDate.getTime()) / (1000 * 60 * 60 * 24));
+      
+      let contextStr: string;
       
       if (temporal.isInPast) {
-        contextStr += ` (${Math.abs(diffDays)} days ago)`;
+        const daysAgo = Math.abs(daysFromNow);
+        if (temporal.recurringPattern) {
+          contextStr = `"${temporal.originalText}" refers to ${resolvedDateStr} [recurring ${temporal.recurringPattern.frequency}]`;
+        } else {
+          contextStr = `"${temporal.originalText}" referred to ${resolvedDateStr} (${daysAgo} days ago)`;
+        }
       } else {
-        contextStr += ` (in ${diffDays} days)`;
-      }
-      
-      if (temporal.recurringPattern) {
-        contextStr += ` [recurring ${temporal.recurringPattern.frequency}]`;
+        // Future event
+        if (daysFromNow === 0) {
+          contextStr = `"${temporal.originalText}" refers to today (${resolvedDateStr})`;
+        } else if (daysFromNow === 1) {
+          contextStr = `"${temporal.originalText}" refers to tomorrow (${resolvedDateStr})`;
+        } else {
+          contextStr = `"${temporal.originalText}" refers to ${resolvedDateStr} (in ${daysFromNow} days)`;
+        }
+        
+        if (temporal.recurringPattern) {
+          contextStr += ` [recurring ${temporal.recurringPattern.frequency}]`;
+        }
       }
       
       contexts.push(contextStr);
