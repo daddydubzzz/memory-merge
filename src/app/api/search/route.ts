@@ -419,6 +419,141 @@ export async function POST(request: NextRequest) {
         }
       }
 
+      case 'test-pipeline': {
+        // Test the complete search pipeline step by step
+        console.log('🔬 TESTING COMPLETE SEARCH PIPELINE');
+        
+        try {
+          const testAccountId = 'iVjLBoNSrfYcHSsAEFEx';
+          const testQuery = 'nuts';
+          
+          const results: {
+            step1_vectorData: any;
+            step2_embedding: any;
+            step3_supabaseRaw: any;
+            step4_hydratedResults: any;
+            errors: string[];
+          } = {
+            step1_vectorData: null,
+            step2_embedding: null,
+            step3_supabaseRaw: null,
+            step4_hydratedResults: null,
+            errors: []
+          };
+          
+          // Step 1: Check what vector data exists
+          try {
+            const { supabase } = await import('@/lib/supabase');
+            const { data: vectorData, error: vectorError } = await supabase
+              .from('knowledge_vectors')
+              .select('id, account_id, firebase_doc_id, enhanced_content')
+              .eq('account_id', testAccountId)
+              .limit(5);
+              
+            results.step1_vectorData = {
+              success: !vectorError,
+              error: vectorError?.message,
+              count: vectorData?.length || 0,
+              data: vectorData?.map(v => ({
+                id: v.id,
+                firebase_doc_id: v.firebase_doc_id,
+                enhanced_content_preview: v.enhanced_content?.substring(0, 100) + '...'
+              }))
+            };
+          } catch (error) {
+            results.errors.push(`Step 1: ${error instanceof Error ? error.message : 'Unknown error'}`);
+          }
+          
+          // Step 2: Test embedding generation
+          try {
+            const OpenAI = (await import('openai')).default;
+            const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+            
+            const response = await openai.embeddings.create({
+              model: 'text-embedding-3-large',
+              input: testQuery,
+              encoding_format: 'float',
+              dimensions: 1536,
+            });
+            
+            const embedding = response.data[0]?.embedding || [];
+            results.step2_embedding = {
+              success: true,
+              embeddingLength: embedding.length,
+              firstValues: embedding.slice(0, 3),
+              isValid: embedding.length === 1536 && !embedding.every((val: number) => val === 0)
+            };
+          } catch (error) {
+            results.step2_embedding = {
+              success: false,
+              error: error instanceof Error ? error.message : 'Unknown error'
+            };
+          }
+          
+          // Step 3: Test direct Supabase query (if embedding worked)
+          if (results.step2_embedding?.success) {
+            try {
+              const { supabase } = await import('@/lib/supabase');
+              const testEmbedding = new Array(1536).fill(0.1); // Simple test embedding
+              
+              const { data: rawData, error: rawError } = await supabase
+                .from('knowledge_vectors')
+                .select('id, firebase_doc_id, enhanced_content, embedding')
+                .eq('account_id', testAccountId);
+                
+              results.step3_supabaseRaw = {
+                success: !rawError,
+                error: rawError?.message,
+                rawDataCount: rawData?.length || 0,
+                hasEmbeddings: rawData?.some(d => d.embedding && Array.isArray(d.embedding))
+              };
+            } catch (error) {
+              results.step3_supabaseRaw = {
+                success: false,
+                error: error instanceof Error ? error.message : 'Unknown error'
+              };
+            }
+          }
+          
+          // Step 4: Test the actual search function
+          try {
+            const { hybridSearch } = await import('@/lib/vector-search');
+            const searchResults = await hybridSearch(testAccountId, testQuery, {
+              matchThreshold: 0.1,
+              matchCount: 10
+            });
+            
+            results.step4_hydratedResults = {
+              success: true,
+              resultCount: searchResults.length,
+              results: searchResults.map(r => ({
+                id: r.id,
+                similarity: r.similarity,
+                content: r.content?.substring(0, 50) + '...'
+              }))
+            };
+          } catch (error) {
+            results.step4_hydratedResults = {
+              success: false,
+              error: error instanceof Error ? error.message : 'Unknown error'
+            };
+          }
+          
+          return NextResponse.json({
+            success: true,
+            pipelineTest: results
+          });
+          
+        } catch (error) {
+          return NextResponse.json({
+            success: false,
+            pipelineTest: {
+              error: error instanceof Error ? error.message : 'Unknown error'
+            }
+          });
+        }
+      }
+
       default:
         return NextResponse.json(
           { error: 'Invalid action. Use: search, recent, tags, or debug' },
