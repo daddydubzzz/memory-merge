@@ -53,19 +53,25 @@ async function generateEmbedding(text: string): Promise<number[]> {
  */
 export async function storeWithEmbedding(
   accountId: string,
-  entry: Omit<KnowledgeEntry, 'id' | 'createdAt' | 'updatedAt' | 'accountId'>
+  entry: Omit<KnowledgeEntry, 'id' | 'createdAt' | 'updatedAt' | 'accountId'> & { 
+    userTimezone?: string;
+    clientStorageDate?: string; // ISO string from client in user's timezone
+  }
 ): Promise<string> {
   try {
-    // IMPORTANT: Use the actual time when the entry was created
-    // This represents when the user actually added the information
-    const storageDate = new Date();
+    // Use client-provided storage date (in user's timezone) if available
+    // Otherwise fall back to server time
+    const storageDate = entry.clientStorageDate 
+      ? new Date(entry.clientStorageDate)
+      : new Date();
     
     // For temporal processing, use the same date to ensure consistency
     // This ensures "tomorrow" gets resolved relative to when the user said it
     const temporalReferenceDate = storageDate;
     
     console.log(`📅 Storage date: ${storageDate.toISOString()}`);
-    console.log(`📅 Local storage date: ${storageDate.toLocaleDateString()} ${storageDate.toLocaleTimeString()}`);
+    console.log(`📅 Client storage date: ${entry.clientStorageDate || 'not provided'}`);
+    console.log(`📅 User timezone: ${entry.userTimezone || 'not provided'}`);
     
     // Use provided display name or fall back to user lookup (with improved error handling)
     let userName = entry.addedByName;
@@ -94,8 +100,20 @@ export async function storeWithEmbedding(
     // 4. Processed content: "remind my wife there's a birthday party tomorrow (Tuesday, January 16, 2024)"
     
     const userContext = `Added by ${userName}`;
-    // Use the actual storage date for context, not the temporal reference date
-    const storageContext = `on ${storageDate.toLocaleDateString('en-CA')}`; // YYYY-MM-DD format in local time
+    
+    // Use client storage date if provided, otherwise format server date
+    // This ensures the date reflects when the user actually added it in their timezone
+    let storageDateFormatted: string;
+    if (entry.clientStorageDate) {
+      // Parse the client date and format as YYYY-MM-DD
+      const clientDate = new Date(entry.clientStorageDate);
+      storageDateFormatted = clientDate.toISOString().split('T')[0]; // YYYY-MM-DD
+    } else {
+      // Fallback to server date formatting (this will be in UTC timezone)
+      storageDateFormatted = storageDate.toLocaleDateString('en-CA'); // YYYY-MM-DD format
+    }
+    
+    const storageContext = `on ${storageDateFormatted}`;
     const temporalContext = temporalInfo.containsTemporalRefs 
       ? `, referring to temporal events: ${temporalInfo.temporalInfo.map(t => 
           `"${t.originalText}" (${t.resolvedDate?.toLocaleDateString() || 'unresolved'})`

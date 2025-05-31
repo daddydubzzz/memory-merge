@@ -47,7 +47,10 @@ export class KnowledgeCRUDService {
   }
 
   // Store new knowledge entry with vector embedding support
-  async addKnowledge(entry: Omit<KnowledgeEntry, 'id' | 'createdAt' | 'updatedAt' | 'accountId'>): Promise<string> {
+  async addKnowledge(entry: Omit<KnowledgeEntry, 'id' | 'createdAt' | 'updatedAt' | 'accountId'> & {
+    clientStorageDate?: string;
+    userTimezone?: string;
+  }): Promise<string> {
     try {
       // Set default intent if not specified
       const entryWithDefaults = {
@@ -60,7 +63,9 @@ export class KnowledgeCRUDService {
         intent: entryWithDefaults.intent,
         content: entryWithDefaults.content,
         replaces: entryWithDefaults.replaces,
-        timestamp: entryWithDefaults.timestamp
+        timestamp: entryWithDefaults.timestamp,
+        clientStorageDate: entryWithDefaults.clientStorageDate,
+        userTimezone: entryWithDefaults.userTimezone
       });
 
       // Try to store with vector embedding first via API

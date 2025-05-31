@@ -25,7 +25,10 @@ export class UnifiedKnowledgeService {
   }
 
   // Core CRUD operations
-  async addKnowledge(entry: Omit<KnowledgeEntry, 'id' | 'createdAt' | 'updatedAt' | 'accountId'>): Promise<string> {
+  async addKnowledge(entry: Omit<KnowledgeEntry, 'id' | 'createdAt' | 'updatedAt' | 'accountId'> & {
+    clientStorageDate?: string;
+    userTimezone?: string;
+  }): Promise<string> {
     // Handle revision logic for updates using revision service
     if (entry.intent === 'update' && entry.replaces) {
       console.log('🔄 Processing update - calling handleMemoryReplacement');

@@ -133,7 +133,10 @@ export default function ChatInterface({ accountId }: ChatInterfaceProps) {
             timestamp: processedQuery.timestamp || new Date().toISOString(),
             // Pass shopping fields if present
             items: processedQuery.items,
-            listType: processedQuery.listType
+            listType: processedQuery.listType,
+            // NEW: Pass client timezone information for accurate date handling
+            clientStorageDate: new Date().toISOString(), // Current time in user's timezone
+            userTimezone: Intl.DateTimeFormat().resolvedOptions().timeZone
           });
 
           const isUpdate = processedQuery.intent === 'update';
