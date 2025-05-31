@@ -584,6 +584,88 @@ export async function POST(request: NextRequest) {
         }
       }
 
+      case 'test-similarity-scores': {
+        // Test actual similarity scores to see what we're getting
+        console.log('🔍 TESTING ACTUAL SIMILARITY SCORES');
+        
+        try {
+          const { supabase } = await import('@/lib/supabase');
+          const OpenAI = (await import('openai')).default;
+          const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+          
+          // Generate embedding for "nuts"
+          const nutsResponse = await openai.embeddings.create({
+            model: 'text-embedding-3-large',
+            input: 'nuts',
+            encoding_format: 'float',
+            dimensions: 1536,
+          });
+          const nutsEmbedding = nutsResponse.data[0]?.embedding || [];
+          
+          // Test with progressively lower thresholds
+          const thresholds = [0.5, 0.3, 0.1, 0.05, 0.01, 0.0, -1.0];
+          const testResults = [];
+          
+          for (const threshold of thresholds) {
+            try {
+              const { data, error } = await supabase.rpc('match_knowledge_vectors', {
+                query_embedding: nutsEmbedding,
+                account_id: 'iVjLBoNSrfYcHSsAEFEx',
+                match_threshold: threshold,
+                match_count: 5
+              });
+              
+              testResults.push({
+                threshold,
+                hasError: !!error,
+                errorMessage: error?.message || null,
+                resultCount: data?.length || 0,
+                topResult: data?.[0] ? {
+                  id: data[0].id,
+                  similarity: data[0].similarity,
+                  enhanced_content_preview: data[0].enhanced_content?.substring(0, 100) + '...'
+                } : null
+              });
+              
+              if (data && data.length > 0) {
+                console.log(`✅ Threshold ${threshold}: Found ${data.length} results, top similarity: ${data[0].similarity}`);
+                break; // Found results, no need to try lower thresholds
+              }
+            } catch (err) {
+              testResults.push({
+                threshold,
+                hasError: true,
+                errorMessage: err instanceof Error ? err.message : 'Unknown error',
+                resultCount: 0,
+                topResult: null
+              });
+            }
+          }
+          
+          return NextResponse.json({
+            success: true,
+            similarityTest: {
+              query: 'nuts',
+              embeddingLength: nutsEmbedding.length,
+              thresholdTests: testResults,
+              summary: {
+                foundResults: testResults.some(t => t.resultCount > 0),
+                bestThreshold: testResults.find(t => t.resultCount > 0)?.threshold || 'none',
+                maxSimilarity: Math.max(...testResults.map(t => t.topResult?.similarity || -2))
+              }
+            }
+          });
+          
+        } catch (error) {
+          return NextResponse.json({
+            success: false,
+            similarityTest: {
+              error: error instanceof Error ? error.message : 'Unknown error'
+            }
+          });
+        }
+      }
+
       case 'test-function-debug': {
         // Debug the exact function call to understand the signature mismatch
         console.log('🔬 DEBUGGING FUNCTION SIGNATURE MISMATCH');
@@ -652,7 +734,7 @@ export async function POST(request: NextRequest) {
 
       default:
         return NextResponse.json(
-          { error: 'Invalid action. Use: search, recent, tags, debug, test-nuts, test-full-pipeline, test-supabase-direct, test-censorship, test-schema, test-pipeline, or test-function-debug' },
+          { error: 'Invalid action. Use: search, recent, tags, debug, test-nuts, test-full-pipeline, test-supabase-direct, test-censorship, test-schema, test-pipeline, test-similarity-scores, or test-function-debug' },
           { status: 400 }
         );
     }
