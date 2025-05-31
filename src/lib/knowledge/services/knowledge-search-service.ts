@@ -18,21 +18,105 @@ import type { KnowledgeEntry } from '../types';
 // Synonym mapping for better search recall
 const SYNONYM_GROUPS = {
   // Anatomical terms (male)
-  testicles: ['testicle', 'testicles', 'balls', 'ball', 'nuts', 'nut', 'nads', 'family jewels', 'boys', 'sack', 'ballsack', 'nutsack', 'scrotum', 'gonads'],
-  
+  testicles: [
+    'balls', 'nuts', 'testicles', 'testicle', 'sack', 'ballsack', 'nutsack',
+    'family jewels', 'nads', 'gonads', 'stones', 'plums', 'rocks', 'eggs',
+    'cojones', 'bollocks', 'beans'
+  ],
+
+  // Anatomical terms (male)
+  penis: [
+    'dick', 'cock', 'penis', 'johnson', 'prick', 'dong', 'wang', 'tool',
+    'member', 'shaft', 'rod', 'pecker', 'stick', 'phallus', 'meat',
+    'package', 'junk', 'manhood'
+  ],
+
+  // Anatomical terms (female)
+  vagina: [
+    'pussy', 'vagina', 'cooch', 'coochie', 'kitty', 'snatch', 'vajayjay',
+    'beaver', 'hoo-ha', 'fanny', 'flower', 'lady bits', 'cunt'
+  ],
+
   // Anatomical terms (general)
-  penis: ['penis', 'dick', 'cock', 'member', 'shaft', 'junk', 'package', 'manhood'],
-  breasts: ['breasts', 'breast', 'boobs', 'tits', 'chest', 'bust'],
-  
-  // Medical/body terms
-  buttocks: ['butt', 'ass', 'rear', 'behind', 'bottom', 'buttocks', 'glutes'],
-  
-  // Common slang expansions
-  money: ['money', 'cash', 'dough', 'bucks', 'dollars'],
-  car: ['car', 'vehicle', 'ride', 'wheels', 'auto'],
-  house: ['house', 'home', 'place', 'pad', 'crib'],
-  
-  // Add more groups as needed
+  breasts: [
+    'boobs', 'tits', 'breasts', 'boob', 'titties', 'rack', 'melons',
+    'knockers', 'chest', 'girls', 'jugs', 'assets', 'hooters', 'bust',
+    'bosom'
+  ],
+
+  // Anatomical terms (general)
+  buttocks: [
+    'ass', 'butt', 'booty', 'buttocks', 'cheeks', 'rear', 'behind',
+    'bottom', 'glutes', 'bum', 'rump', 'arse', 'derriere'
+  ],
+
+  // Anatomical terms (general)
+  anus: [
+    'asshole', 'anus', 'butthole', 'arsehole', 'brown eye', 'backdoor',
+    'starfish'
+  ],
+
+  // Sexual activity
+  sex: [
+    'sex', 'hook up', 'bang', 'smash', 'get laid', 'bone', 'score',
+    'screw', 'do it', 'make love', 'shag', 'get busy', 'fool around',
+    'get it on', 'ride'
+  ],
+
+  // Money & payments
+  money: [
+    'money', 'cash', 'bucks', 'dollars', 'bread', 'cheddar', 'dough',
+    'moolah', 'loot', 'stacks', 'green', 'paper', 'bands', 'cream',
+    'scratch', 'bank', 'dinero'
+  ],
+
+  // Vehicles
+  car: [
+    'car', 'ride', 'wheels', 'vehicle', 'whip', 'auto', 'motor',
+    'beater', 'hoopty', 'set of wheels'
+  ],
+
+  // Housing
+  house: [
+    'house', 'home', 'crib', 'pad', 'place', 'spot', 'diggs', 'dwelling',
+    'residence'
+  ],
+
+  // Alcohol
+  alcohol: [
+    'booze', 'drinks', 'alcohol', 'liquor', 'beer', 'brew', 'shots',
+    'spirits', 'vino', 'wine', 'hooch', 'bevvies'
+  ],
+
+  // Intoxication (alcohol)
+  drunk: [
+    'drunk', 'wasted', 'hammered', 'sloshed', 'plastered', 'smashed',
+    'lit', 'buzzed', 'tipsy', 'blitzed', 'tanked'
+  ],
+
+  // Cannabis
+  marijuana: [
+    'weed', 'pot', 'marijuana', 'ganja', 'herb', 'grass', 'bud',
+    'mary jane', 'chronic', 'loud', 'reefer', 'dope', 'greenery'
+  ],
+
+  // Cocaine
+  cocaine: [
+    'coke', 'blow', 'cocaine', 'snow', 'powder', 'nose candy', 'white',
+    'yayo', 'charlie'
+  ],
+
+  // Law enforcement
+  police: [
+    'cops', 'police', 'cop', 'five-o', 'po-po', 'law', 'heat', 'fuzz',
+    'boys in blue', 'pigs'
+  ],
+
+  // Friends & acquaintances
+  friend: [
+    'friend', 'buddy', 'pal', 'homie', 'bro', 'dude', 'mate', 'amigo',
+    'compadre', 'ace', 'partner-in-crime'
+  ]
 };
 
 /**
