@@ -3,7 +3,7 @@ import { processUserInput, generateResponse } from '@/lib/openai';
 
 export async function POST(request: NextRequest) {
   try {
-    const { action, input, searchResults } = await request.json();
+    const { action, input, searchResults, userTimezone, userLocalDateTime } = await request.json();
 
     if (!input) {
       return NextResponse.json(
@@ -14,11 +14,11 @@ export async function POST(request: NextRequest) {
 
     if (action === 'process') {
       // Process user input to determine intent and categorization
-      const result = await processUserInput(input);
+      const result = await processUserInput(input, { userTimezone, userLocalDateTime });
       return NextResponse.json(result);
     } else if (action === 'generate') {
       // Generate response based on search results
-      const response = await generateResponse(input, searchResults || []);
+      const response = await generateResponse(input, searchResults || [], { userTimezone, userLocalDateTime });
       return NextResponse.json(response);
     } else {
       return NextResponse.json(

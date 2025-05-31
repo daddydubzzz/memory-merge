@@ -213,7 +213,7 @@ Your job is to:
 - For updates: Store COMPLETE information, not just the change!
 - Always provide full, readable content that stands alone!
 
-Current date and time: ${new Date().toISOString()}`;
+Current date and time: PLACEHOLDER_DATETIME`;
 
 // Enhanced system prompt for temporally-aware responses
 const RESPONSE_PROMPT = `You are a temporally-aware AI assistant for managing shared household and personal knowledge.
@@ -297,18 +297,37 @@ const RESPONSE_PROMPT = `You are a temporally-aware AI assistant for managing sh
 - The temporal context shows the ACTUAL resolved dates. If "tomorrow" resolves to May 31st, the event IS on May 31st, not some other date.
 - **MOST IMPORTANT: Each person has their own birthday date - NEVER confuse dates between different people!**
 
-Current date and time: ${new Date().toISOString()}`;
+Current date and time: PLACEHOLDER_DATETIME`;
 
-export async function processUserInput(input: string): Promise<ProcessedQuery> {
+export async function processUserInput(
+  input: string, 
+  options: { userTimezone?: string; userLocalDateTime?: string } = {}
+): Promise<ProcessedQuery> {
   try {
     // First, process the input for temporal expressions
     const temporalInfo = await processTemporalContent(input);
+    
+    // Create system prompt with user's local time if available
+    const currentDateTime = options.userLocalDateTime || new Date().toLocaleString('en-US', {
+      weekday: 'long',
+      year: 'numeric',
+      month: 'long',
+      day: 'numeric',
+      hour: 'numeric',
+      minute: '2-digit',
+      timeZoneName: 'short'
+    });
+    
+    const taggingPromptWithTime = TAGGING_PROMPT.replace(
+      /Current date and time: PLACEHOLDER_DATETIME/,
+      `Current date and time: ${currentDateTime}`
+    );
     
     const openai = createOpenAIClient();
     const completion = await openai.chat.completions.create({
       model: "gpt-4o-mini",
       messages: [
-        { role: "system", content: TAGGING_PROMPT },
+        { role: "system", content: taggingPromptWithTime },
         { role: "user", content: input }
       ],
       tools: [{ type: "function", function: tagProcessingFunction }],
@@ -415,15 +434,33 @@ export async function processUserInput(input: string): Promise<ProcessedQuery> {
 
 export async function generateResponse(
   query: string, 
-  relevantEntries: KnowledgeEntry[]
+  relevantEntries: KnowledgeEntry[],
+  options: { userTimezone?: string; userLocalDateTime?: string } = {}
 ): Promise<QueryResponse> {
   try {
     const openai = createOpenAIClient();
+    
+    // Create system prompt with user's local time if available
+    const currentDateTime = options.userLocalDateTime || new Date().toLocaleString('en-US', {
+      weekday: 'long',
+      year: 'numeric',
+      month: 'long',
+      day: 'numeric',
+      hour: 'numeric',
+      minute: '2-digit',
+      timeZoneName: 'short'
+    });
+    
+    const responsePromptWithTime = RESPONSE_PROMPT.replace(
+      /Current date and time: PLACEHOLDER_DATETIME/,
+      `Current date and time: ${currentDateTime}`
+    );
     
     // Enhanced debug logging for birthday queries
     const isBirthdayQuery = query.toLowerCase().includes('birthday') || query.toLowerCase().includes('b-day');
     if (isBirthdayQuery) {
       console.log('🎂 BIRTHDAY QUERY DETECTED:', query);
+      console.log('🕒 Using local time:', currentDateTime);
       console.log('🔍 Search results returned:');
       relevantEntries.forEach((entry, index) => {
         const enhancedContent = (entry as KnowledgeEntry & { enhanced_content?: string }).enhanced_content || entry.content;
@@ -532,7 +569,7 @@ export async function generateResponse(
     const completion = await openai.chat.completions.create({
       model: "gpt-4o-mini",
       messages: [
-        { role: "system", content: RESPONSE_PROMPT },
+        { role: "system", content: responsePromptWithTime },
         { role: "user", content: `Query: ${query}\n\n${context}` }
       ],
       tools: [{ type: "function", function: responseFunction }],

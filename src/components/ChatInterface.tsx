@@ -60,11 +60,30 @@ export default function ChatInterface({ accountId }: ChatInterfaceProps) {
     setIsLoading(true);
 
     try {
+      // Get user's timezone for proper date handling
+      const userTimezone = Intl.DateTimeFormat().resolvedOptions().timeZone;
+      const now = new Date();
+      const userLocalDateTime = now.toLocaleString('en-US', {
+        timeZone: userTimezone,
+        weekday: 'long',
+        year: 'numeric',
+        month: 'long',
+        day: 'numeric',
+        hour: 'numeric',
+        minute: '2-digit',
+        timeZoneName: 'short'
+      });
+
       // Process user input with OpenAI via API
       const processResponse = await fetch('/api/ai/process', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ action: 'process', input: content }),
+        body: JSON.stringify({ 
+          action: 'process', 
+          input: content, 
+          userTimezone: userTimezone,
+          userLocalDateTime: userLocalDateTime
+        }),
       });
       
       if (!processResponse.ok) {
@@ -187,7 +206,9 @@ export default function ChatInterface({ accountId }: ChatInterfaceProps) {
           body: JSON.stringify({ 
             action: 'generate', 
             input: content, 
-            searchResults: searchResults 
+            searchResults: searchResults,
+            userTimezone: userTimezone,
+            userLocalDateTime: userLocalDateTime
           }),
         });
         
