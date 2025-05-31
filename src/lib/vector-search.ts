@@ -12,6 +12,21 @@ import type {
 import type { TemporalInfo } from './temporal-processor';
 import type { KnowledgeEntry } from './knowledge/types';
 
+// Type for Supabase vector search results
+interface SupabaseVectorResult {
+  id: string;
+  firebase_doc_id: string;
+  account_id: string;
+  enhanced_content?: string;
+  temporal_info?: TemporalInfo[];
+  resolved_dates?: string[];
+  temporal_relevance_score?: number;
+  contains_temporal_refs?: boolean;
+  created_at: string;
+  updated_at: string;
+  similarity: number;
+}
+
 // Create OpenAI client - this should only be used server-side
 function createOpenAIClient() {
   const apiKey = process.env.OPENAI_API_KEY;
@@ -280,7 +295,7 @@ export async function searchKnowledgeVector(
       }
       
       console.log(`🎯 Found ${relaxedData.length} results with VERY relaxed threshold`);
-      relaxedData.forEach((result: any, index: number) => {
+      relaxedData.forEach((result: SupabaseVectorResult, index: number) => {
         console.log(`  ${index + 1}. Similarity: ${result.similarity?.toFixed(3)} - Preview: ${result.enhanced_content?.substring(0, 100)}...`);
       });
       
@@ -290,7 +305,7 @@ export async function searchKnowledgeVector(
     }
 
     console.log(`🎯 Found ${data.length} vector matches with primary threshold`);
-    data.forEach((result: any, index: number) => {
+    data.forEach((result: SupabaseVectorResult, index: number) => {
       console.log(`  ${index + 1}. Similarity: ${result.similarity?.toFixed(3)} - Preview: ${result.enhanced_content?.substring(0, 100)}...`);
     });
 
@@ -516,19 +531,7 @@ export async function getKnowledgeVectorsByTags(
 /**
  * Hydrate vector search results by fetching core data from Firebase using Admin SDK
  */
-async function hydrateSearchResults(vectorResults: {
-  id: string;
-  firebase_doc_id: string;
-  account_id: string;
-  enhanced_content?: string;
-  temporal_info?: TemporalInfo[];
-  resolved_dates?: string[];
-  temporal_relevance_score?: number;
-  contains_temporal_refs?: boolean;
-  created_at: string;
-  updated_at: string;
-  similarity: number;
-}[]): Promise<VectorSearchResult[]> {
+async function hydrateSearchResults(vectorResults: SupabaseVectorResult[]): Promise<VectorSearchResult[]> {
   if (vectorResults.length === 0) {
     console.log('🔍 No vector results to hydrate');
     return [];

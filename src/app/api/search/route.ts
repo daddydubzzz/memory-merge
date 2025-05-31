@@ -205,8 +205,6 @@ export async function POST(request: NextRequest) {
         // Test the complete pipeline: store testicle content, then search for nuts
         console.log('🧪 TESTING FULL NUTS→TESTICLE PIPELINE');
         
-        const testAccountId = 'test-nuts-account';
-        
         // Simulate storing testicle content with our enhanced system
         const testContent = "My left testicle is best described as a perfectly oblong paraboloid with minor warping due to seasonal gravitational shifts.";
         
