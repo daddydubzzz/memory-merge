@@ -652,7 +652,7 @@ export async function POST(request: NextRequest) {
 
       default:
         return NextResponse.json(
-          { error: 'Invalid action. Use: search, recent, tags, or debug' },
+          { error: 'Invalid action. Use: search, recent, tags, debug, test-nuts, test-full-pipeline, test-supabase-direct, test-censorship, test-schema, test-pipeline, or test-function-debug' },
           { status: 400 }
         );
     }
