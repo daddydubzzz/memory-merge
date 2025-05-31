@@ -235,40 +235,51 @@ const RESPONSE_PROMPT = `You are a temporally-aware AI assistant for managing sh
    - For birthdays/anniversaries, ALWAYS calculate the next occurrence from the current date
    - Example: If today is May 30, 2025 and birthday was November 15, 2022 → next birthday is November 15, 2025
 
-3. **Correct Temporal Response Examples**:
+3. **CRITICAL: NEVER CONFUSE DATES BETWEEN DIFFERENT PEOPLE**:
+   - **Each person has their own specific birthday date - DO NOT mix them up!**
+   - If you see multiple birthday entries, carefully match each date to the correct person
+   - Example: If you see "Kyle's daughter's birthday party is tomorrow" AND "Daniela's birthday is May 12th":
+     - Kyle's daughter's birthday = tomorrow's resolved date (e.g., May 31st)
+     - Daniela's birthday = May 12th
+     - **NEVER say Kyle's daughter's birthday is May 12th!**
+   - Always double-check which person each date belongs to before responding
+   - When multiple people are mentioned, be extra careful about date attribution
+
+4. **Correct Temporal Response Examples**:
    - Query: "When is the birthday?"
    - Context: "tomorrow" refers to Saturday, May 31, 2025
    - CORRECT: "The birthday is scheduled for Saturday, May 31, 2025."
    - WRONG: "The birthday would have been May 30th" (this is completely incorrect)
 
-4. **Recurring Event Examples**:
+5. **Recurring Event Examples**:
    - Query: "How many days until Sebastian's birthday?"
    - Context: Sebastian's birthday was on November 15, 2022
    - CORRECT: "Sebastian's next birthday is November 15, 2025, which is 169 days from now."
    - WRONG: "Sebastian's birthday was on November 15, 2022, which means it has already passed."
 
-5. **Temporal Status Guidelines**:
+6. **Temporal Status Guidelines**:
    - Past events: Use past tense ("The birthday was on...")
    - Future events: Use future tense ("The birthday is scheduled for...")
    - Today's events: Use present tense ("The birthday is today...")
    - Recurring events: Calculate next occurrence ("The next birthday is...")
 
-6. **Smart Temporal Suggestions**:
+7. **Smart Temporal Suggestions**:
    - For expired one-time events: "This event has passed. Would you like me to help you find current events?"
    - For recurring events: "The next occurrence is January 22nd (in 5 days)."
    - For future events: "This is scheduled for January 20th, which is in 3 days."
 
-7. **USER CONTEXT INTELLIGENCE**:
+8. **USER CONTEXT INTELLIGENCE**:
    - Each entry shows who added it (look for "Added by [Name]:" in the enhanced content)
    - When users ask about specific people ("What did Walter say about...", "Did John mention..."), prioritize entries from that person
    - Use this context to make intelligent connections and provide more personalized responses
 
-8. **Priority Rules**:
+9. **Priority Rules**:
    - ALWAYS use the resolved date from temporal context as the actual event date
    - For recurring events, ALWAYS calculate next occurrence regardless of storage date
    - Current/future events take priority over past events
    - More recent information takes priority over older information
    - Recurring events maintain relevance regardless of storage date
+   - **NEVER mix up dates between different people - this is a critical error!**
 
 **FORMAT GUIDELINES**:
 - Be warm and conversational, like talking to a helpful friend
@@ -284,6 +295,7 @@ const RESPONSE_PROMPT = `You are a temporally-aware AI assistant for managing sh
 - Birthdays and anniversaries are ALWAYS recurring yearly events
 - Never dismiss birthdays as "already passed" - calculate the next occurrence
 - The temporal context shows the ACTUAL resolved dates. If "tomorrow" resolves to May 31st, the event IS on May 31st, not some other date.
+- **MOST IMPORTANT: Each person has their own birthday date - NEVER confuse dates between different people!**
 
 Current date and time: ${new Date().toISOString()}`;
 
@@ -408,13 +420,63 @@ export async function generateResponse(
   try {
     const openai = createOpenAIClient();
     
+    // Enhanced debug logging for birthday queries
+    const isBirthdayQuery = query.toLowerCase().includes('birthday') || query.toLowerCase().includes('b-day');
+    if (isBirthdayQuery) {
+      console.log('🎂 BIRTHDAY QUERY DETECTED:', query);
+      console.log('🔍 Search results returned:');
+      relevantEntries.forEach((entry, index) => {
+        const enhancedContent = (entry as KnowledgeEntry & { enhanced_content?: string }).enhanced_content || entry.content;
+        const userMatch = enhancedContent.match(/^Added by ([^:]+):/);
+        const userName = userMatch ? userMatch[1] : 'Unknown';
+        console.log(`   ${index + 1}. 🏷️ [${entry.tags.join(', ')}] by ${userName}:`);
+        console.log(`      Content: "${entry.content}"`);
+        if (enhancedContent !== entry.content) {
+          console.log(`      Enhanced: "${enhancedContent}"`);
+        }
+        if (entry.temporalInfo && entry.temporalInfo.length > 0) {
+          console.log(`      Temporal info:`, entry.temporalInfo.map(t => ({
+            text: t.originalText,
+            date: t.resolvedDate?.toLocaleDateString(),
+            type: t.temporalType
+          })));
+        }
+      });
+    }
+    
     // Enhanced context that includes user information and temporal context
     const context = relevantEntries.length > 0 
-      ? `Relevant information found:\n${relevantEntries.map(entry => {
+      ? `Relevant information found:\n${relevantEntries.map((entry, index) => {
           // Get the user name from enhanced content if available, or fall back to addedBy
           const enhancedContent = (entry as KnowledgeEntry & { enhanced_content?: string }).enhanced_content || entry.content;
           const userMatch = enhancedContent.match(/^Added by ([^:]+):/);
           const userName = userMatch ? userMatch[1] : 'Someone';
+          
+          // Extract person names mentioned in the content for birthday context
+          const contentLower = entry.content.toLowerCase();
+          const isBirthdayEntry = contentLower.includes('birthday') || contentLower.includes('b-day');
+          let personContext = '';
+          
+          if (isBirthdayEntry) {
+            // Try to identify whose birthday this is about
+            const birthdayPersons = [];
+            if (contentLower.includes("kyle") && (contentLower.includes("daughter") || contentLower.includes("maria"))) {
+              birthdayPersons.push("Kyle and Maria's daughter");
+            }
+            if (contentLower.includes("daniela")) {
+              birthdayPersons.push("Daniela");
+            }
+            if (contentLower.includes("sebastian")) {
+              birthdayPersons.push("Sebastian");
+            }
+            if (contentLower.includes("my birthday") || contentLower.includes("i was born")) {
+              birthdayPersons.push(`${userName}`);
+            }
+            
+            if (birthdayPersons.length > 0) {
+              personContext = ` [ABOUT: ${birthdayPersons.join(", ")}]`;
+            }
+          }
           
           // Add enhanced temporal context for recurring events
           let temporalContext = '';
@@ -458,9 +520,14 @@ export async function generateResponse(
             }
           }
           
-          return `🏷️ [${entry.tags.join(', ')}] by ${userName}: ${entry.content}${temporalContext}`;
+          return `ENTRY ${index + 1}: 🏷️ [${entry.tags.join(', ')}] by ${userName}${personContext}: ${entry.content}${temporalContext}`;
         }).join('\n')}`
       : 'No specific information found in the knowledge base.';
+
+    if (isBirthdayQuery) {
+      console.log('🤖 Context being sent to AI:');
+      console.log(context);
+    }
 
     const completion = await openai.chat.completions.create({
       model: "gpt-4o-mini",
@@ -495,6 +562,10 @@ export async function generateResponse(
       }),
       temporalEntries: relevantEntries.filter(e => e.temporalInfo && e.temporalInfo.length > 0).length
     });
+
+    if (isBirthdayQuery) {
+      console.log('🎂 AI Response for birthday query:', validatedResult.answer);
+    }
     
     return {
       answer: validatedResult.answer,
