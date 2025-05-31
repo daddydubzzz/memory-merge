@@ -15,6 +15,49 @@ import type { KnowledgeEntry } from '../types';
  * Handles search operations, vector similarity, caching, and filtering
  */
 
+// Synonym mapping for better search recall
+const SYNONYM_GROUPS = {
+  // Anatomical terms (male)
+  testicles: ['testicle', 'testicles', 'balls', 'ball', 'nuts', 'nut', 'nads', 'family jewels', 'boys', 'sack', 'ballsack', 'nutsack', 'scrotum', 'gonads'],
+  
+  // Anatomical terms (general)
+  penis: ['penis', 'dick', 'cock', 'member', 'shaft', 'junk', 'package', 'manhood'],
+  breasts: ['breasts', 'breast', 'boobs', 'tits', 'chest', 'bust'],
+  
+  // Medical/body terms
+  buttocks: ['butt', 'ass', 'rear', 'behind', 'bottom', 'buttocks', 'glutes'],
+  
+  // Common slang expansions
+  money: ['money', 'cash', 'dough', 'bucks', 'dollars'],
+  car: ['car', 'vehicle', 'ride', 'wheels', 'auto'],
+  house: ['house', 'home', 'place', 'pad', 'crib'],
+  
+  // Add more groups as needed
+};
+
+/**
+ * Expand search terms with synonyms for better recall
+ */
+function expandSearchTermsWithSynonyms(searchTerms: string[]): string[] {
+  const expandedTerms = new Set(searchTerms);
+  
+  for (const term of searchTerms) {
+    const lowerTerm = term.toLowerCase();
+    
+    // Find which synonym group this term belongs to
+    for (const synonyms of Object.values(SYNONYM_GROUPS)) {
+      if (synonyms.includes(lowerTerm)) {
+        // Add all synonyms from this group
+        synonyms.forEach(synonym => expandedTerms.add(synonym));
+        console.log(`🔍 Expanded "${term}" with synonyms:`, synonyms.slice(0, 5));
+        break;
+      }
+    }
+  }
+  
+  return Array.from(expandedTerms);
+}
+
 // Helper function to call search API routes
 async function callSearchAPI(action: string, data: Record<string, unknown>) {
   const response = await fetch('/api/search', {
@@ -42,8 +85,16 @@ export class KnowledgeSearchService {
 
   // Enhanced search using vector similarity with tag-based filtering, caching, and revision support
   async searchKnowledge(searchTerms: string[], tags?: string[], includeSuperseded: boolean = false): Promise<KnowledgeEntry[]> {
-    const searchQuery = searchTerms.join(' ');
+    // Expand search terms with synonyms for better recall
+    const expandedSearchTerms = expandSearchTermsWithSynonyms(searchTerms);
+    
+    const searchQuery = expandedSearchTerms.join(' ');
     const cacheKey = cacheKeys.searchResults(this.accountId, searchQuery, tags);
+    
+    console.log(`🔍 Original search terms: [${searchTerms.join(', ')}]`);
+    if (expandedSearchTerms.length > searchTerms.length) {
+      console.log(`🔍 Expanded search terms: [${expandedSearchTerms.join(', ')}]`);
+    }
     
     // Check cache first (2 minute TTL for search results)
     const cached = cache.get<KnowledgeEntry[]>(cacheKey);
@@ -60,8 +111,8 @@ export class KnowledgeSearchService {
           query: searchQuery,
           tags, // Pass tags for filtering
           options: {
-            matchThreshold: 0.4, // Lower threshold for more results
-            matchCount: 20,
+            matchThreshold: 0.3, // Lower threshold for expanded terms
+            matchCount: 30, // More results to account for expansion
             minResults: 3
           }
         });
@@ -86,15 +137,15 @@ export class KnowledgeSearchService {
         // If we have good vector results, cache and return them
         if (entries.length > 0) {
           cache.set(cacheKey, entries, 2); // 2 minute cache
-          console.log(`🔍 Vector search found ${entries.length} results`);
+          console.log(`🔍 Vector search found ${entries.length} results with expanded terms`);
           return this.filterSupersededEntries(entries, includeSuperseded);
         }
       } catch (vectorError) {
         console.warn('Vector search failed, falling back to Firestore:', vectorError);
       }
 
-      // Fallback to original Firestore search with tag filtering
-      const results = await this.searchKnowledgeFirestore(searchTerms, tags, includeSuperseded);
+      // Fallback to original Firestore search with tag filtering and expanded terms
+      const results = await this.searchKnowledgeFirestore(expandedSearchTerms, tags, includeSuperseded);
       
       // Cache Firestore results too (shorter TTL)
       cache.set(cacheKey, results, 1); // 1 minute cache for fallback

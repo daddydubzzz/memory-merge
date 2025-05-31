@@ -21,6 +21,51 @@ const EmbeddingResponseSchema = z.object({
   }))
 });
 
+// Synonym mapping for enriching stored content
+const SYNONYM_GROUPS = {
+  // Anatomical terms (male)
+  testicles: ['testicle', 'testicles', 'balls', 'ball', 'nuts', 'nut', 'nads', 'family jewels', 'boys', 'sack', 'ballsack', 'nutsack', 'scrotum', 'gonads'],
+  
+  // Anatomical terms (general)  
+  penis: ['penis', 'dick', 'cock', 'member', 'shaft', 'junk', 'package', 'manhood'],
+  breasts: ['breasts', 'breast', 'boobs', 'tits', 'chest', 'bust'],
+  
+  // Medical/body terms
+  buttocks: ['butt', 'ass', 'rear', 'behind', 'bottom', 'buttocks', 'glutes'],
+  
+  // Common slang expansions
+  money: ['money', 'cash', 'dough', 'bucks', 'dollars'],
+  car: ['car', 'vehicle', 'ride', 'wheels', 'auto'],
+  house: ['house', 'home', 'place', 'pad', 'crib'],
+};
+
+/**
+ * Enrich content with synonyms for better searchability
+ */
+function enrichContentWithSynonyms(content: string): string {
+  let enrichedContent = content;
+  const foundSynonyms: string[] = [];
+  
+  for (const synonyms of Object.values(SYNONYM_GROUPS)) {
+    for (const synonym of synonyms) {
+      const regex = new RegExp(`\\b${synonym}\\b`, 'gi');
+      if (regex.test(content)) {
+        // Add some related synonyms to the content (not all to avoid spam)
+        const relatedSynonyms = synonyms.filter(s => s !== synonym).slice(0, 3);
+        foundSynonyms.push(...relatedSynonyms);
+        console.log(`🔗 Found "${synonym}", adding related terms: [${relatedSynonyms.join(', ')}]`);
+        break; // Only process one match per group
+      }
+    }
+  }
+  
+  if (foundSynonyms.length > 0) {
+    enrichedContent += ` [Related terms: ${foundSynonyms.join(', ')}]`;
+  }
+  
+  return enrichedContent;
+}
+
 /**
  * Generate embedding for text using OpenAI's text-embedding-3-small model
  */
@@ -121,12 +166,15 @@ export async function storeWithEmbedding(
         ).join(', ')}`
       : '';
     
-    const enhancedContent = `${userContext} ${storageContext}: ${temporalInfo.processedContent}${temporalContext}`;
+    // Enrich content with synonyms for better searchability  
+    const synonymEnrichedContent = enrichContentWithSynonyms(temporalInfo.processedContent);
+    
+    const enhancedContent = `${userContext} ${storageContext}: ${synonymEnrichedContent}${temporalContext}`;
     
     console.log(`📝 Creating temporally-aware embedding for: ${userName}`);
     console.log(`🧠 Enhanced content: ${enhancedContent.substring(0, 150)}...`);
     
-    // Generate embedding for the enhanced content (with user and temporal context)
+    // Generate embedding with enriched content
     const embedding = await generateEmbedding(enhancedContent);
 
     // Store in Supabase with all temporal metadata
