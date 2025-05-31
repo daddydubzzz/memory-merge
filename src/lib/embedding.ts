@@ -101,16 +101,17 @@ export async function storeWithEmbedding(
     
     const userContext = `Added by ${userName}`;
     
-    // Use client storage date if provided, otherwise format server date
-    // This ensures the date reflects when the user actually added it in their timezone
+    // Use client storage date if provided (already in YYYY-MM-DD format from client's local timezone)
+    // Otherwise format server date as fallback
     let storageDateFormatted: string;
     if (entry.clientStorageDate) {
-      // Parse the client date and format as YYYY-MM-DD
-      const clientDate = new Date(entry.clientStorageDate);
-      storageDateFormatted = clientDate.toISOString().split('T')[0]; // YYYY-MM-DD
+      // Client sends date already formatted as YYYY-MM-DD in their local timezone
+      storageDateFormatted = entry.clientStorageDate;
+      console.log(`📅 Using client local date: ${storageDateFormatted}`);
     } else {
       // Fallback to server date formatting (this will be in UTC timezone)
       storageDateFormatted = storageDate.toLocaleDateString('en-CA'); // YYYY-MM-DD format
+      console.log(`📅 Using server date fallback: ${storageDateFormatted}`);
     }
     
     const storageContext = `on ${storageDateFormatted}`;

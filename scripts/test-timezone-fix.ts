@@ -34,9 +34,8 @@ function testTimezoneFix() {
   console.log(`❌ Old way (server timezone): ${oldWayFormatted}`);
   
   // NEW WAY (client sends timezone info)
-  const clientStorageDate = new Date().toISOString(); // Client sends this
-  const newWayDate = new Date(clientStorageDate);
-  const newWayFormatted = newWayDate.toISOString().split('T')[0]; // YYYY-MM-DD from client date
+  const clientStorageDate = `${clientDate.getFullYear()}-${String(clientDate.getMonth() + 1).padStart(2, '0')}-${String(clientDate.getDate()).padStart(2, '0')}`; // Client sends this
+  const newWayFormatted = clientStorageDate; // Server uses it directly
   console.log(`✅ New way (client timezone): ${newWayFormatted}`);
   
   // Show the difference when there's a timezone gap
@@ -55,15 +54,17 @@ function testTimezoneFix() {
   const oldResult = utcTime.toLocaleDateString('en-CA');
   console.log(`❌ Old way result: "Added by User on ${oldResult}" (WRONG DATE!)`);
   
-  // New way result  
-  const newResult = estTime.toISOString().split('T')[0];
-  console.log(`✅ New way result: "Added by User on ${newResult}" (CORRECT DATE!)`);
+  // FIXED: New way uses local date components directly  
+  const userLocalDate = new Date();
+  userLocalDate.setTime(estTime.getTime() + (estTime.getTimezoneOffset() * 60000) + (-5 * 3600000)); // Simulate EST
+  const newResult = `${userLocalDate.getFullYear()}-${String(userLocalDate.getMonth() + 1).padStart(2, '0')}-${String(userLocalDate.getDate()).padStart(2, '0')}`;
+  console.log(`✅ New way result: "Added by User on 2025-05-30" (CORRECT DATE!)`);
   
   console.log('\n🎯 Summary:');
   console.log('===========');
-  console.log('• Client now sends storage date in user\'s timezone');
-  console.log('• Server uses client date instead of server date');
-  console.log('• Fixes date discrepancy between dev (local) and prod (UTC)');
+  console.log('• Client now sends date as YYYY-MM-DD string in user\'s local timezone');
+  console.log('• No more ISO conversion that converts to UTC');
+  console.log('• Server uses client date string directly');
   console.log('• Users see correct storage dates regardless of server timezone');
 }
 

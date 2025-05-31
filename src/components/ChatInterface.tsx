@@ -122,6 +122,7 @@ export default function ChatInterface({ accountId }: ChatInterfaceProps) {
           
         } else {
           // Store new information or update existing information (original logic)
+          const now = new Date();
           await knowledgeService.addKnowledge({
             content: processedQuery.content,
             tags: processedQuery.tags,
@@ -134,8 +135,8 @@ export default function ChatInterface({ accountId }: ChatInterfaceProps) {
             // Pass shopping fields if present
             items: processedQuery.items,
             listType: processedQuery.listType,
-            // NEW: Pass client timezone information for accurate date handling
-            clientStorageDate: new Date().toISOString(), // Current time in user's timezone
+            // FIXED: Pass actual local date in user's timezone (not UTC)
+            clientStorageDate: `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`, // YYYY-MM-DD in user's local timezone
             userTimezone: Intl.DateTimeFormat().resolvedOptions().timeZone
           });
 
