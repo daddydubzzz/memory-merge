@@ -238,6 +238,55 @@ export async function POST(request: NextRequest) {
         });
       }
 
+      case 'test-supabase-direct': {
+        // Direct test of Supabase vector search function
+        console.log('🔬 TESTING SUPABASE FUNCTION DIRECTLY');
+        
+        const { supabase } = await import('@/lib/supabase');
+        
+        // Create a simple test embedding (all zeros for now)
+        const testEmbedding = new Array(1536).fill(0);
+        
+        console.log('🧪 Testing Supabase RPC with minimal parameters...');
+        
+        try {
+          const { data, error } = await supabase.rpc('match_knowledge_vectors', {
+            query_embedding: testEmbedding,
+            account_id: 'iVjLBoNSrfYcHSsAEFEx',
+            match_threshold: 0.0, // Get everything
+            match_count: 10
+          });
+          
+          console.log('📊 Supabase RPC Result:', { 
+            success: !error, 
+            error: error?.message, 
+            resultCount: data?.length 
+          });
+          
+          return NextResponse.json({
+            success: true,
+            supabaseTest: {
+              hasError: !!error,
+              errorMessage: error?.message || null,
+              resultCount: data?.length || 0,
+              firstResult: data?.[0] || null,
+              allResults: data || []
+            }
+          });
+          
+        } catch (testError) {
+          console.error('💥 Supabase RPC Test Error:', testError);
+          return NextResponse.json({
+            success: false,
+            supabaseTest: {
+              hasError: true,
+              errorMessage: testError instanceof Error ? testError.message : 'Unknown error',
+              exception: testError
+            }
+          });
+        }
+      }
+
       default:
         return NextResponse.json(
           { error: 'Invalid action. Use: search, recent, tags, or debug' },
