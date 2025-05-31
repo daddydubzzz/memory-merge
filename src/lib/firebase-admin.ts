@@ -15,18 +15,18 @@ function getFirebaseAdmin() {
       adminApp = adminAppExists;
     } else {
       try {
-        // Use the existing service account key from Vercel environment
-        if (process.env.NEXT_PUBLIC_SERVICE_ROLE_SECRET) {
+        // Use the correct service account key from Vercel environment
+        if (process.env.FIREBASE_SERVICE_ACCOUNT_KEY) {
           // Use service account key from Vercel environment
-          const serviceAccount = JSON.parse(process.env.NEXT_PUBLIC_SERVICE_ROLE_SECRET);
+          const serviceAccount = JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT_KEY);
           adminApp = initializeApp({
             credential: cert(serviceAccount),
             projectId: process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID,
           });
           console.log('🔑 Firebase Admin initialized with Vercel service account');
-        } else if (process.env.FIREBASE_SERVICE_ACCOUNT_KEY) {
-          // Fallback to alternative service account key
-          const serviceAccount = JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT_KEY);
+        } else if (process.env.NEXT_PUBLIC_SERVICE_ROLE_SECRET) {
+          // Fallback to alternative service account key name
+          const serviceAccount = JSON.parse(process.env.NEXT_PUBLIC_SERVICE_ROLE_SECRET);
           adminApp = initializeApp({
             credential: cert(serviceAccount),
             projectId: process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID,
