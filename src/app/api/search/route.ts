@@ -584,6 +584,72 @@ export async function POST(request: NextRequest) {
         }
       }
 
+      case 'test-function-debug': {
+        // Debug the exact function call to understand the signature mismatch
+        console.log('🔬 DEBUGGING FUNCTION SIGNATURE MISMATCH');
+        
+        const { supabase } = await import('@/lib/supabase');
+        
+        try {
+          // Test 1: Try calling without optional parameters
+          console.log('🧪 Test 1: Minimal parameters...');
+          const { data: test1Data, error: test1Error } = await supabase.rpc('match_knowledge_vectors', {
+            query_embedding: new Array(1536).fill(0.1),
+            account_id: 'iVjLBoNSrfYcHSsAEFEx',
+            match_threshold: 0.0,
+            match_count: 1
+          });
+          
+          // Test 2: Try with all parameters
+          console.log('🧪 Test 2: All parameters...');
+          const { data: test2Data, error: test2Error } = await supabase.rpc('match_knowledge_vectors', {
+            query_embedding: new Array(1536).fill(0.1),
+            account_id: 'iVjLBoNSrfYcHSsAEFEx',
+            match_threshold: 0.0,
+            match_count: 1,
+            include_temporal_filter: false,
+            temporal_relevance_threshold: 0.3
+          });
+          
+          // Test 3: Try getting function info from Supabase
+          console.log('🧪 Test 3: Query function metadata...');
+          const { data: funcData, error: funcError } = await supabase
+            .from('pg_proc')
+            .select('proname, proargtypes, prorettype')
+            .eq('proname', 'match_knowledge_vectors')
+            .limit(1);
+          
+          return NextResponse.json({
+            success: true,
+            functionDebug: {
+              test1: {
+                hasError: !!test1Error,
+                errorMessage: test1Error?.message || null,
+                resultCount: test1Data?.length || 0
+              },
+              test2: {
+                hasError: !!test2Error,
+                errorMessage: test2Error?.message || null,
+                resultCount: test2Data?.length || 0
+              },
+              functionMetadata: {
+                hasError: !!funcError,
+                errorMessage: funcError?.message || null,
+                data: funcData || null
+              }
+            }
+          });
+          
+        } catch (error) {
+          return NextResponse.json({
+            success: false,
+            functionDebug: {
+              error: error instanceof Error ? error.message : 'Unknown error'
+            }
+          });
+        }
+      }
+
       default:
         return NextResponse.json(
           { error: 'Invalid action. Use: search, recent, tags, or debug' },
