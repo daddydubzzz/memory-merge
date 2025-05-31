@@ -1,6 +1,7 @@
 import OpenAI from 'openai';
 import { z } from 'zod';
 import type { KnowledgeEntry } from './knowledge/types';
+import { processTemporalContent, createTemporalContext } from './temporal-processor';
 
 // Create OpenAI client - this should only be used server-side
 function createOpenAIClient() {
@@ -12,7 +13,7 @@ function createOpenAIClient() {
 // Export interfaces from constants
 export type { KnowledgeEntry } from './knowledge/types';
 
-// Updated Zod schemas for tag-based validation with revision and shopping support
+// Updated Zod schemas for tag-based validation with revision, shopping, and temporal support
 const ProcessedQuerySchema = z.object({
   intent: z.enum(['store', 'retrieve', 'update', 'unclear', 'purchase', 'clear_list']),
   tags: z.array(z.string()).min(1).max(4),
@@ -24,7 +25,10 @@ const ProcessedQuerySchema = z.object({
   timestamp: z.string().optional(), // ISO string timestamp
   // New shopping list fields
   items: z.array(z.string()).optional(), // Individual items for shopping lists
-  listType: z.string().optional() // e.g., "shopping", "grocery", "todo"
+  listType: z.string().optional(), // e.g., "shopping", "grocery", "todo"
+  // New temporal fields
+  temporalExpressions: z.array(z.string()).optional(), // Temporal expressions found
+  temporalIntent: z.enum(['future', 'past', 'current', 'general']).optional() // Temporal intent
 });
 
 const QueryResponseSchema = z.object({
@@ -45,6 +49,9 @@ export interface ProcessedQuery {
   // New shopping list fields
   items?: string[]; // Individual items for shopping lists
   listType?: string; // e.g., "shopping", "grocery", "todo"
+  // New temporal fields
+  temporalExpressions?: string[]; // Temporal expressions found
+  temporalIntent?: 'future' | 'past' | 'current' | 'general'; // Temporal intent
 }
 
 export interface QueryResponse {
@@ -54,10 +61,10 @@ export interface QueryResponse {
   suggestions: string[];
 }
 
-// Updated function definition for tag-based processing with revision and shopping support
+// Enhanced function definition for temporal-aware processing
 const tagProcessingFunction = {
   name: "process_user_input",
-  description: "Analyze user input to determine intent and generate relevant tags for a knowledge management system with revision and shopping list support",
+  description: "Analyze user input to determine intent and generate relevant tags for a temporally-aware knowledge management system",
   parameters: {
     type: "object",
     properties: {
@@ -104,23 +111,27 @@ const tagProcessingFunction = {
       listType: {
         type: "string",
         description: "Type of list: 'shopping', 'grocery', 'todo', etc."
+      },
+      temporalExpressions: {
+        type: "array",
+        items: { type: "string" },
+        description: "Temporal expressions found in the input (e.g., ['tomorrow', 'next week', 'in 3 days'])"
+      },
+      temporalIntent: {
+        type: "string",
+        enum: ["future", "past", "current", "general"],
+        description: "Temporal intent: 'future' for upcoming events, 'past' for historical queries, 'current' for immediate timeframe, 'general' for non-temporal"
       }
     },
     required: ["intent", "tags", "content", "searchTerms", "confidence"],
-    // replaces and timestamp are optional but should be provided for updates
-    // items and listType should be provided for shopping operations
-    conditionallyRequired: {
-      update: ["replaces"],
-      purchase: ["items"],
-      clear_list: ["listType"]
-    }
+    // Additional fields are optional but should be provided when relevant
   }
 };
 
-// Function definition for response generation (updated for tags)
+// Function definition for response generation (updated for temporal awareness)
 const responseFunction = {
   name: "generate_response",
-  description: "Generate a helpful, conversational response based on user query and available information",
+  description: "Generate a helpful, conversational response based on user query and available information with temporal awareness",
   parameters: {
     type: "object",
     properties: {
@@ -144,8 +155,8 @@ const responseFunction = {
   }
 };
 
-// Enhanced system prompt for tag-based processing with revision and shopping list support
-const TAGGING_PROMPT = `You are an AI assistant that helps organize and tag shared knowledge with intelligent revision tracking and shopping list management.
+// Enhanced system prompt with temporal intelligence
+const TAGGING_PROMPT = `You are an AI assistant with advanced temporal reasoning capabilities for knowledge management.
 
 Your job is to:
 1. Determine the user's **intent**:
@@ -156,91 +167,106 @@ Your job is to:
    - "clear_list": Bulk operations to clear/reset lists
    - "unclear": Cannot determine intent
 
-2. **SHOPPING LIST SEMANTICS**:
+2. **TEMPORAL PROCESSING RULES**:
+   - **Detect Temporal References**: Identify all time-related expressions:
+     * Relative: "tomorrow", "next week", "in 3 days", "last Friday"
+     * Absolute: "January 15th", "2024-03-10", "March 5th at 2pm"
+     * Recurring: "every Monday", "weekly", "monthly meetings"
+     * Contextual: "after the meeting", "before Christmas"
+
+   - **Temporal Intent Classification**:
+     * "future": Future-focused, upcoming events, planning
+     * "past": Historical events, things that happened
+     * "current": Current timeframe, today, this week
+     * "general": Non-temporal or unclear temporal context
+
+3. **SHOPPING LIST SEMANTICS**:
    - "Add X to shopping list" → store, items: ["X"], listType: "shopping"
    - "I bought/purchased X" → purchase, items: ["X"], replaces: "shopping"
    - "Clear my grocery list" → clear_list, listType: "grocery"
    - Smart matching: "bought cheese" should match "sliced cheese" from list
 
-3. **CRITICAL for updates**: Detect update language like:
+4. **CRITICAL for updates**: Detect update language like:
    - "We moved/changed/updated the [thing] to [new value]"
    - "The [thing] is now [new value]" 
    - "Actually, the [thing] is [new value]"
    - "Correction: [thing] is [new value]"
 
-4. **CRITICAL for purchases**: Detect purchase language like:
-   - "I bought/purchased [items]"
-   - "We got [items] from the store"
-   - "[Person] picked up [items]"
-   - "Got [items] today"
-
-5. For **shopping operations**, set:
-   - intent: "purchase" or "clear_list" 
-   - items: Extract individual items as array
-   - listType: "shopping", "grocery", "todo", etc.
-   - replaces: The list type being affected
+5. **TEMPORAL EXAMPLES**:
+   - "Remind my wife about birthday party tomorrow" → 
+     * intent: "store", temporalExpressions: ["tomorrow"], temporalIntent: "future"
+   - "When was the last doctor appointment?" →
+     * intent: "retrieve", temporalExpressions: ["last"], temporalIntent: "past"
+   - "What do I have scheduled for today?" →
+     * intent: "retrieve", temporalExpressions: ["today"], temporalIntent: "current"
+   - "Every Monday we have team standup" →
+     * intent: "store", temporalExpressions: ["every Monday"], temporalIntent: "future"
 
 6. Return relevant **tags** (2–4 max) using lowercase terms.
 7. Extract useful **search terms**.
-8. Provide **confidence** score (0.0-1.0).
-
-**Examples:**
-- "Add butter, milk, sliced cheese, and bread to my shopping list" → store, content: "Need butter, milk, sliced cheese, and bread", tags: ["shopping", "groceries"], items: ["butter", "milk", "sliced cheese", "bread"], listType: "shopping"
-
-- "My wife purchased cheese and milk" → purchase, content: "Purchased cheese and milk", tags: ["shopping", "groceries"], items: ["cheese", "milk"], replaces: "shopping"
-
-- "Clear my grocery list" → clear_list, content: "Clear grocery list", tags: ["shopping", "groceries"], listType: "grocery"
-
-- "What do I need from the store?" → retrieve, content: "What do I need from the store?", tags: ["shopping", "groceries"]
-
-- "We moved the family reunion to July 9" → update, content: "The family reunion is scheduled for July 9", tags: ["family", "reunion", "event"], replaces: "family-reunion"
-
-- "Our doctor is Dr. Ramirez at Westside Pediatrics" → store, content: "Our doctor is Dr. Ramirez at Westside Pediatrics", tags: ["doctor", "health", "pediatrics"]
+8. Identify **temporal expressions** and **temporal intent**.
+9. Provide **confidence** score (0.0-1.0).
 
 **Key Rules**: 
+- For temporal content: Always extract temporal expressions and classify intent!
 - For shopping: Extract individual items and understand list operations!
-- For purchases: Mark items as bought to remove from active shopping list!
 - For updates: Store COMPLETE information, not just the change!
 - Always provide full, readable content that stands alone!
-- Smart matching: "cheese" matches "sliced cheese", "milk" matches "whole milk"!`;
 
-// Enhanced system prompt for generating responses with shopping list awareness and user context
-const RESPONSE_PROMPT = `You are a helpful AI assistant for managing shared household and personal knowledge with smart shopping list capabilities and user context awareness.
+Current date and time: ${new Date().toISOString()}`;
 
-Given a user's query and relevant knowledge entries, provide a helpful, conversational response. 
+// Enhanced system prompt for temporally-aware responses
+const RESPONSE_PROMPT = `You are a temporally-aware AI assistant for managing shared household and personal knowledge.
 
-**USER CONTEXT INTELLIGENCE**:
-- Each entry shows who added it (look for "Added by [Name]:" in the enhanced content)
-- When users ask about specific people ("What did Walter say about...", "Did John mention..."), prioritize entries from that person
-- If you can't find exact matches but see related information from a specific person, mention that connection
-- For example: "I didn't find specific information about that, but Walter did mention something about testicles that might be related..."
-- Use this context to make intelligent connections and provide more personalized responses
-- When multiple people contributed to a topic, acknowledge the different perspectives
+**TEMPORAL RESPONSE INTELLIGENCE**:
 
-**SHOPPING LIST INTELLIGENCE**:
-- For "What do I need?" queries: Show only ACTIVE shopping list items (no "purchased" or "cleared" tags)
-- For "What did I buy?" queries: Show only purchase records ("purchased" tag)
-- Smart filtering: Ignore superseded entries (replaced_by field set)
-- If no active items: "Your shopping list is empty" or "You don't have any items on your shopping list right now"
-- If shopping list was recently cleared: Acknowledge it and suggest adding new items
+1. **Context Awareness**: 
+   - When someone asks "when is the birthday party?", look for future events, not past ones
+   - If temporal references in stored content are now outdated, mention this clearly
+   - Distinguish between current events and historical information
+
+2. **Temporal Reasoning Examples**:
+   - Query: "When is the birthday party?"
+   - Old Entry: "Birthday party tomorrow" (stored 1 week ago)
+   - Response: "I found a reference to a birthday party that was mentioned a week ago for 'tomorrow' (which would have been January 16th), but that's now in the past. Are you looking for a current/upcoming birthday party?"
+
+3. **Smart Temporal Suggestions**:
+   - For expired events: "This event has passed. Would you like me to help you find current events?"
+   - For recurring events: "This happens every Monday. The next occurrence is January 22nd."
+   - For future events: "This is scheduled for January 20th, which is in 3 days."
+
+4. **Temporal Context in Responses**:
+   - Always mention when information was stored if temporal context matters
+   - Clarify if events are past, current, or future
+   - Suggest related current events when showing past events
+
+5. **USER CONTEXT INTELLIGENCE**:
+   - Each entry shows who added it (look for "Added by [Name]:" in the enhanced content)
+   - When users ask about specific people ("What did Walter say about...", "Did John mention..."), prioritize entries from that person
+   - Use this context to make intelligent connections and provide more personalized responses
+
+6. **Priority Rules**:
+   - Current/future events take priority over past events
+   - More recent information takes priority over older information
+   - Recurring events maintain relevance regardless of storage date
 
 Guidelines:
 - Be warm and conversational, like talking to a helpful friend
 - If information is found, present it clearly and offer to help with related tasks
 - If no exact match, suggest related information or ask clarifying questions
-- Use user context to make smart connections ("Walter mentioned..." or "Based on what John shared...")
+- Use temporal and user context to make smart connections
 - Always maintain a helpful, supportive tone
 - Keep responses concise but complete
-- Don't assume specific relationships (could be family, roommates, partners, etc.)
-- Make the experience personal to the current user
 - When referencing entries, show their tags and who added them: 🏷️ [wifi, password] by John: "The WiFi password is..."
-- For shopping lists, present items clearly: "You need: butter, milk, cheese, bread"
-- For empty shopping lists, be encouraging: "Your shopping list is empty! Ready to add some items?"
+- For temporal content, provide clear temporal context: "This was scheduled for last Tuesday (3 days ago)"
 
-Provide 2-3 helpful follow-up suggestions that make sense in context.`;
+Current date and time: ${new Date().toISOString()}`;
 
 export async function processUserInput(input: string): Promise<ProcessedQuery> {
   try {
+    // First, process the input for temporal expressions
+    const temporalInfo = await processTemporalContent(input);
+    
     const openai = createOpenAIClient();
     const completion = await openai.chat.completions.create({
       model: "gpt-4o-mini",
@@ -262,35 +288,80 @@ export async function processUserInput(input: string): Promise<ProcessedQuery> {
     const rawResult = JSON.parse(toolCall.function.arguments);
     const validatedResult = ProcessedQuerySchema.parse(rawResult);
     
+    // Enhance the result with temporal information if not already provided by AI
+    if (temporalInfo.containsTemporalRefs && !validatedResult.temporalExpressions) {
+      validatedResult.temporalExpressions = temporalInfo.temporalInfo.map(t => t.originalText);
+      
+      // Determine temporal intent if not provided
+      if (!validatedResult.temporalIntent) {
+        const lowerInput = input.toLowerCase();
+        if (lowerInput.includes('will') || lowerInput.includes('upcoming') || 
+            lowerInput.includes('next') || lowerInput.includes('tomorrow') ||
+            lowerInput.includes('future') || lowerInput.includes('planning')) {
+          validatedResult.temporalIntent = 'future';
+        } else if (lowerInput.includes('was') || lowerInput.includes('did') || 
+                   lowerInput.includes('happened') || lowerInput.includes('last') ||
+                   lowerInput.includes('ago') || lowerInput.includes('yesterday')) {
+          validatedResult.temporalIntent = 'past';
+        } else if (lowerInput.includes('today') || lowerInput.includes('now') || 
+                   lowerInput.includes('current') || lowerInput.includes('this week')) {
+          validatedResult.temporalIntent = 'current';
+        } else {
+          validatedResult.temporalIntent = 'general';
+        }
+      }
+    }
+    
     // Debug logging for development
     console.log('🏷️ AI Tagging Results:', {
       input,
       tags: validatedResult.tags,
       intent: validatedResult.intent,
-      confidence: validatedResult.confidence
+      confidence: validatedResult.confidence,
+      temporalExpressions: validatedResult.temporalExpressions,
+      temporalIntent: validatedResult.temporalIntent
     });
     
     return validatedResult;
   } catch (error) {
     console.error('Error processing user input:', error);
     
-    // Enhanced fallback with tag-based categorization
+    // Enhanced fallback with tag-based categorization and temporal awareness
     const lowerInput = input.toLowerCase();
     let fallbackTags = ['misc'];
+    let temporalIntent: 'future' | 'past' | 'current' | 'general' = 'general';
     
     // Simple keyword-based fallback tagging
     if (lowerInput.includes('remind') || lowerInput.includes('remember') || lowerInput.includes('need to')) {
       fallbackTags = ['reminder', 'task'];
+      temporalIntent = 'future';
     } else if (lowerInput.includes('where') || lowerInput.includes('put') || lowerInput.includes('stored')) {
       fallbackTags = ['storage', 'location'];
     } else if (lowerInput.includes('password') || lowerInput.includes('wifi')) {
       fallbackTags = ['password', 'wifi'];
     } else if (lowerInput.includes('appointment') || lowerInput.includes('meeting')) {
       fallbackTags = ['appointment', 'schedule'];
+      temporalIntent = 'future';
     } else if (lowerInput.includes('doctor') || lowerInput.includes('health')) {
       fallbackTags = ['health', 'medical'];
     } else if (lowerInput.includes('car') || lowerInput.includes('vehicle')) {
       fallbackTags = ['car', 'vehicle'];
+    }
+    
+    // Check for temporal expressions in fallback
+    const temporalExpressions: string[] = [];
+    const temporalKeywords = ['tomorrow', 'yesterday', 'today', 'next week', 'last week', 'next month', 'last month'];
+    for (const keyword of temporalKeywords) {
+      if (lowerInput.includes(keyword)) {
+        temporalExpressions.push(keyword);
+        if (keyword.includes('next') || keyword === 'tomorrow') {
+          temporalIntent = 'future';
+        } else if (keyword.includes('last') || keyword === 'yesterday') {
+          temporalIntent = 'past';
+        } else if (keyword === 'today') {
+          temporalIntent = 'current';
+        }
+      }
     }
     
     return {
@@ -298,7 +369,9 @@ export async function processUserInput(input: string): Promise<ProcessedQuery> {
       tags: fallbackTags,
       content: input,
       searchTerms: input.split(' ').filter(word => word.length > 3),
-      confidence: 0.3
+      confidence: 0.3,
+      temporalExpressions: temporalExpressions.length > 0 ? temporalExpressions : undefined,
+      temporalIntent: temporalExpressions.length > 0 ? temporalIntent : undefined
     };
   }
 }
@@ -310,7 +383,7 @@ export async function generateResponse(
   try {
     const openai = createOpenAIClient();
     
-    // Enhanced context that includes user information
+    // Enhanced context that includes user information and temporal context
     const context = relevantEntries.length > 0 
       ? `Relevant information found:\n${relevantEntries.map(entry => {
           // Get the user name from enhanced content if available, or fall back to addedBy
@@ -318,7 +391,13 @@ export async function generateResponse(
           const userMatch = enhancedContent.match(/^Added by ([^:]+):/);
           const userName = userMatch ? userMatch[1] : 'Someone';
           
-          return `🏷️ [${entry.tags.join(', ')}] by ${userName}: ${entry.content}`;
+          // Add temporal context if available
+          let temporalContext = '';
+          if (entry.temporalInfo && entry.temporalInfo.length > 0) {
+            temporalContext = ` ${createTemporalContext(entry.temporalInfo, entry.createdAt)}`;
+          }
+          
+          return `🏷️ [${entry.tags.join(', ')}] by ${userName}: ${entry.content}${temporalContext}`;
         }).join('\n')}`
       : 'No specific information found in the knowledge base.';
 
@@ -352,7 +431,8 @@ export async function generateResponse(
         const enhancedContent = (e as KnowledgeEntry & { enhanced_content?: string }).enhanced_content || e.content;
         const userMatch = enhancedContent.match(/^Added by ([^:]+):/);
         return userMatch ? userMatch[1] : 'Unknown';
-      })
+      }),
+      temporalEntries: relevantEntries.filter(e => e.temporalInfo && e.temporalInfo.length > 0).length
     });
     
     return {
@@ -364,14 +444,24 @@ export async function generateResponse(
   } catch (error) {
     console.error('Error generating response:', error);
     
-    // Enhanced fallback response with user context
+    // Enhanced fallback response with user context and temporal awareness
     if (relevantEntries.length > 0) {
       // Try to extract user context from entries for fallback
       const userInfo = relevantEntries.map(entry => {
         const enhancedContent = (entry as KnowledgeEntry & { enhanced_content?: string }).enhanced_content || entry.content;
         const userMatch = enhancedContent.match(/^Added by ([^:]+):/);
         const userName = userMatch ? userMatch[1] : 'Someone';
-        return `${userName} mentioned: ${entry.content.substring(0, 50)}...`;
+        
+        // Add temporal context for fallback
+        let temporalNote = '';
+        if (entry.temporalInfo && entry.temporalInfo.length > 0) {
+          const hasExpiredEvents = entry.temporalInfo.some(t => t.isInPast && !t.recurringPattern);
+          if (hasExpiredEvents) {
+            temporalNote = ' (may be outdated)';
+          }
+        }
+        
+        return `${userName} mentioned: ${entry.content.substring(0, 50)}...${temporalNote}`;
       }).slice(0, 2);
       
       return {
@@ -392,6 +482,10 @@ export async function generateResponse(
         // If query contains potential names
         suggestions.push("Try searching for topics that person might have discussed");
         suggestions.push("Browse recent entries to see what they've shared");
+      } else if (lowerQuery.includes('when') || lowerQuery.includes('tomorrow') || lowerQuery.includes('today')) {
+        // Temporal queries
+        suggestions.push("Try searching for events or schedules");
+        suggestions.push("Look for calendar or appointment information");
       } else {
         suggestions.push("Try being more specific");
         suggestions.push("Add some context or details");

@@ -1,6 +1,15 @@
 import OpenAI from 'openai';
 import { z } from 'zod';
 import { supabase } from './supabase';
+import { 
+  searchWithTemporalAwareness, 
+  processTemporalQuery
+} from './temporal-search';
+import type { 
+  VectorSearchResult,
+  TemporalSearchOptions 
+} from './knowledge/types/knowledge';
+import type { TemporalInfo } from './temporal-processor';
 
 // Create OpenAI client - this should only be used server-side
 function createOpenAIClient() {
@@ -17,19 +26,6 @@ const EmbeddingResponseSchema = z.object({
     embedding: z.array(z.number())
   }))
 });
-
-// Search result with similarity score and enhanced user context
-export interface VectorSearchResult {
-  id: string;
-  content: string;
-  enhanced_content?: string; // Enhanced content with user context used for embedding
-  tags: string[];
-  addedBy: string;
-  addedByName?: string; // Cached display name for quick access
-  createdAt: Date;
-  updatedAt: Date;
-  similarity: number;
-}
 
 /**
  * Generate embedding for search query
@@ -58,7 +54,7 @@ async function generateQueryEmbedding(query: string): Promise<number[]> {
 }
 
 /**
- * Search for knowledge entries using vector similarity
+ * Enhanced search for knowledge entries using temporal-aware vector similarity
  */
 export async function searchKnowledgeVector(
   accountId: string,
@@ -66,18 +62,32 @@ export async function searchKnowledgeVector(
   options: {
     matchThreshold?: number;
     matchCount?: number;
+    useTemporalIntelligence?: boolean;
+    temporalOptions?: TemporalSearchOptions;
   } = {}
 ): Promise<VectorSearchResult[]> {
   try {
     const {
-      matchThreshold = 0.5, // Minimum similarity threshold
-      matchCount = 10       // Maximum number of results
+      matchThreshold = 0.5,
+      matchCount = 10,
+      useTemporalIntelligence = true,
+      temporalOptions = {}
     } = options;
 
     // Generate embedding for the search query
     const queryEmbedding = await generateQueryEmbedding(query);
 
-    // Call the Supabase RPC function
+    // Use temporal-aware search if enabled
+    if (useTemporalIntelligence) {
+      console.log('🕒 Using temporal-aware search');
+      return await searchWithTemporalAwareness(query, accountId, queryEmbedding, {
+        temporalRelevanceThreshold: matchThreshold,
+        ...temporalOptions
+      });
+    }
+
+    // Fallback to basic vector search
+    console.log('📊 Using basic vector search');
     const { data, error } = await supabase.rpc('match_knowledge_vectors', {
       query_embedding: queryEmbedding,
       account_id: accountId,
@@ -99,35 +109,46 @@ export async function searchKnowledgeVector(
       id: string;
       content: string;
       enhanced_content?: string;
+      processed_content?: string;
       tags: string[];
       added_by: string;
       added_by_name?: string;
       created_at: string;
       updated_at: string;
+      account_id: string;
+      temporal_info?: TemporalInfo[];
+      resolved_dates?: string[];
+      temporal_relevance_score?: number;
+      contains_temporal_refs?: boolean;
       similarity: number;
     }) => ({
       id: item.id,
       content: item.content,
       enhanced_content: item.enhanced_content,
+      processed_content: item.processed_content,
       tags: item.tags || [],
       addedBy: item.added_by,
       addedByName: item.added_by_name,
       createdAt: new Date(item.created_at),
       updatedAt: new Date(item.updated_at),
-      similarity: item.similarity
+      accountId: item.account_id,
+      temporalInfo: item.temporal_info || [],
+      resolvedDates: item.resolved_dates?.map((d: string) => new Date(d)) || [],
+      temporalRelevanceScore: item.temporal_relevance_score || 0,
+      containsTemporalRefs: item.contains_temporal_refs || false,
+      similarity: item.similarity,
+      temporalContext: '',
+      isTemporallyRelevant: true
     }));
 
   } catch (error) {
     console.error('Error in searchKnowledgeVector:', error);
-    
-    // Return empty array on error to prevent crashes
-    // In production, you might want to log this to monitoring
     return [];
   }
 }
 
 /**
- * Search with tag-based filtering and fallback to keyword search if vector search returns few results
+ * Enhanced hybrid search with temporal intelligence and tag-based filtering
  */
 export async function hybridSearch(
   accountId: string,
@@ -136,7 +157,9 @@ export async function hybridSearch(
     matchThreshold?: number;
     matchCount?: number;
     minResults?: number;
-    tags?: string[]; // Add tag filtering option
+    tags?: string[];
+    useTemporalIntelligence?: boolean;
+    temporalOptions?: TemporalSearchOptions;
   } = {}
 ): Promise<VectorSearchResult[]> {
   try {
@@ -144,13 +167,29 @@ export async function hybridSearch(
       matchThreshold = 0.5,
       matchCount = 10,
       minResults = 3,
-      tags
+      tags,
+      useTemporalIntelligence = true,
+      temporalOptions = {}
     } = options;
 
-    // First try vector search
+    // Process query for temporal intelligence if enabled
+    let enhancedTemporalOptions = temporalOptions;
+    if (useTemporalIntelligence) {
+      const temporalQuery = await processTemporalQuery(query);
+      enhancedTemporalOptions = {
+        ...temporalOptions,
+        ...temporalQuery.searchOptions
+      };
+      
+      console.log(`🕒 Temporal query processing: intent=${temporalQuery.temporalIntent}, expressions=[${temporalQuery.temporalExpressions.join(', ')}]`);
+    }
+
+    // First try temporal-aware vector search
     const vectorResults = await searchKnowledgeVector(accountId, query, {
       matchThreshold,
-      matchCount
+      matchCount,
+      useTemporalIntelligence,
+      temporalOptions: enhancedTemporalOptions
     });
 
     // Apply tag-based filtering if specified
@@ -169,7 +208,12 @@ export async function hybridSearch(
     // Otherwise, try with a lower threshold for more results
     const relaxedResults = await searchKnowledgeVector(accountId, query, {
       matchThreshold: Math.max(0.3, matchThreshold - 0.2),
-      matchCount: matchCount * 2
+      matchCount: matchCount * 2,
+      useTemporalIntelligence,
+      temporalOptions: {
+        ...enhancedTemporalOptions,
+        includeExpiredEvents: true // Include more results when relaxing
+      }
     });
 
     // Apply tag filtering to relaxed results too
@@ -215,21 +259,35 @@ export async function getRecentKnowledgeVectors(
       id: string;
       content: string;
       enhanced_content?: string;
+      processed_content?: string;
       tags: string[];
       added_by: string;
       added_by_name?: string;
       created_at: string;
       updated_at: string;
+      account_id: string;
+      temporal_info?: TemporalInfo[];
+      resolved_dates?: string[];
+      temporal_relevance_score?: number;
+      contains_temporal_refs?: boolean;
     }) => ({
       id: item.id,
       content: item.content,
       enhanced_content: item.enhanced_content,
+      processed_content: item.processed_content,
       tags: item.tags || [],
       addedBy: item.added_by,
       addedByName: item.added_by_name,
       createdAt: new Date(item.created_at),
       updatedAt: new Date(item.updated_at),
-      similarity: 1.0 // Not applicable for recent entries
+      accountId: item.account_id,
+      temporalInfo: item.temporal_info || [],
+      resolvedDates: item.resolved_dates?.map((d: string) => new Date(d)) || [],
+      temporalRelevanceScore: item.temporal_relevance_score || 0,
+      containsTemporalRefs: item.contains_temporal_refs || false,
+      similarity: 1.0, // Not applicable for recent entries
+      temporalContext: '',
+      isTemporallyRelevant: true
     }));
 
   } catch (error) {
@@ -262,14 +320,39 @@ export async function getKnowledgeVectorsByTags(
       return [];
     }
 
-    return data.map(item => ({
+    return data.map((item: {
+      id: string;
+      content: string;
+      enhanced_content?: string;
+      processed_content?: string;
+      tags: string[];
+      added_by: string;
+      added_by_name?: string;
+      created_at: string;
+      updated_at: string;
+      account_id: string;
+      temporal_info?: TemporalInfo[];
+      resolved_dates?: string[];
+      temporal_relevance_score?: number;
+      contains_temporal_refs?: boolean;
+    }) => ({
       id: item.id,
       content: item.content,
+      enhanced_content: item.enhanced_content,
+      processed_content: item.processed_content,
       tags: item.tags || [],
       addedBy: item.added_by,
+      addedByName: item.added_by_name,
       createdAt: new Date(item.created_at),
       updatedAt: new Date(item.updated_at),
-      similarity: 1.0 // Not applicable for tag browsing
+      accountId: item.account_id,
+      temporalInfo: item.temporal_info || [],
+      resolvedDates: item.resolved_dates?.map((d: string) => new Date(d)) || [],
+      temporalRelevanceScore: item.temporal_relevance_score || 0,
+      containsTemporalRefs: item.contains_temporal_refs || false,
+      similarity: 1.0, // Not applicable for tag browsing
+      temporalContext: '',
+      isTemporallyRelevant: true
     }));
 
   } catch (error) {

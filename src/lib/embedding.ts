@@ -3,6 +3,7 @@ import { z } from 'zod';
 import { supabase } from './supabase';
 import type { KnowledgeEntry } from './knowledge/types';
 import { getUserDisplayName } from './knowledge/services/utility-service';
+import { processTemporalContent } from './temporal-processor';
 
 // Create OpenAI client - this should only be used server-side
 function createOpenAIClient() {
@@ -48,37 +49,61 @@ async function generateEmbedding(text: string): Promise<number[]> {
 
 /**
  * Store knowledge entry with its vector embedding in Supabase
- * Enhanced to include user context in the embedded content for better search relevance
+ * Enhanced with temporal intelligence and user context for superior search relevance
  */
 export async function storeWithEmbedding(
   accountId: string,
   entry: Omit<KnowledgeEntry, 'id' | 'createdAt' | 'updatedAt' | 'accountId'>
 ): Promise<string> {
   try {
-    // Get the user's display name to include in the embedding
+    const currentDate = new Date();
+    
+    // Get the user's display name for user context
     const userName = await getUserDisplayName(entry.addedBy);
     
-    // Create enhanced content that includes user context for embedding
-    // This allows the AI to make connections based on who added what information
-    const enhancedContent = `Added by ${userName}: ${entry.content}`;
+    // Process temporal content to extract and resolve temporal expressions
+    console.log(`🕒 Processing temporal content: "${entry.content}"`);
+    const temporalInfo = await processTemporalContent(entry.content, currentDate);
     
-    console.log(`📝 Creating embedding with user context for: ${userName}`);
+    // Create multi-layered enhanced content for embedding:
+    // 1. User context: "Added by John: ..."
+    // 2. Temporal context: "Stored on 2024-01-15, refers to 2024-01-16: ..."
+    // 3. Original content: "remind my wife there's a birthday party tomorrow"
+    // 4. Processed content: "remind my wife there's a birthday party tomorrow (Tuesday, January 16, 2024)"
     
-    // Generate embedding for the enhanced content (with user context)
+    const userContext = `Added by ${userName}`;
+    const dateContext = `on ${currentDate.toISOString().split('T')[0]}`;
+    const temporalContext = temporalInfo.containsTemporalRefs 
+      ? `, referring to temporal events: ${temporalInfo.temporalInfo.map(t => 
+          `"${t.originalText}" (${t.resolvedDate?.toLocaleDateString() || 'unresolved'})`
+        ).join(', ')}`
+      : '';
+    
+    const enhancedContent = `${userContext} ${dateContext}: ${temporalInfo.processedContent}${temporalContext}`;
+    
+    console.log(`📝 Creating temporally-aware embedding for: ${userName}`);
+    console.log(`🧠 Enhanced content: ${enhancedContent.substring(0, 150)}...`);
+    
+    // Generate embedding for the enhanced content (with user and temporal context)
     const embedding = await generateEmbedding(enhancedContent);
 
-    // Store in Supabase with embedding
-    // Store both original content and enhanced content for different purposes
+    // Store in Supabase with all temporal metadata
     const { data, error } = await supabase
       .from('knowledge_vectors')
       .insert({
         account_id: accountId,
         content: entry.content, // Original content for display
         enhanced_content: enhancedContent, // Enhanced content that was embedded
+        processed_content: temporalInfo.processedContent, // Content with resolved temporal expressions
         tags: entry.tags,
         added_by: entry.addedBy,
-        added_by_name: userName, // Store the display name for quick access
+        added_by_name: userName,
         embedding: embedding,
+        // Temporal intelligence fields
+        temporal_info: temporalInfo.temporalInfo,
+        resolved_dates: temporalInfo.resolvedDates,
+        temporal_relevance_score: temporalInfo.temporalRelevanceScore,
+        contains_temporal_refs: temporalInfo.containsTemporalRefs,
       })
       .select('id')
       .single();
@@ -92,7 +117,13 @@ export async function storeWithEmbedding(
       throw new Error('No ID returned from Supabase insert');
     }
 
-    console.log(`✅ Stored embedding with user context for: ${userName}`);
+    if (temporalInfo.containsTemporalRefs) {
+      console.log(`✅ Stored temporally-aware embedding for: ${userName}`);
+      console.log(`🕒 Temporal refs: ${temporalInfo.temporalInfo.length}, relevance: ${temporalInfo.temporalRelevanceScore.toFixed(2)}`);
+    } else {
+      console.log(`✅ Stored embedding with user context for: ${userName}`);
+    }
+    
     return data.id;
   } catch (error) {
     console.error('Error in storeWithEmbedding:', error);
@@ -102,7 +133,7 @@ export async function storeWithEmbedding(
 
 /**
  * Update existing knowledge vector with new content and embedding
- * Enhanced to include user context in the embedded content
+ * Enhanced with temporal intelligence and user context
  */
 export async function updateWithEmbedding(
   id: string,
@@ -111,13 +142,17 @@ export async function updateWithEmbedding(
   try {
     let embedding: number[] | undefined;
     let enhancedContent: string | undefined;
+    let processedContent: string | undefined;
+    let temporalData: Record<string, unknown> = {};
     
     // Generate new embedding if content changed
     if (updates.content) {
+      const currentDate = new Date();
+      
       // Get the existing entry to find out who added it
       const { data: existingEntry, error: fetchError } = await supabase
         .from('knowledge_vectors')
-        .select('added_by, added_by_name')
+        .select('added_by, added_by_name, created_at')
         .eq('id', id)
         .single();
         
@@ -128,16 +163,40 @@ export async function updateWithEmbedding(
       
       // Use cached name or fetch it if not available
       const userName = existingEntry.added_by_name || await getUserDisplayName(existingEntry.added_by);
-      enhancedContent = `Added by ${userName}: ${updates.content}`;
       
-      console.log(`📝 Updating embedding with user context for: ${userName}`);
+      // Process temporal content
+      console.log(`🕒 Processing updated temporal content: "${updates.content}"`);
+      const temporalInfo = await processTemporalContent(updates.content, currentDate, new Date(existingEntry.created_at));
+      
+      // Create enhanced content with temporal awareness
+      const userContext = `Added by ${userName}`;
+      const dateContext = `on ${currentDate.toISOString().split('T')[0]}`;
+      const temporalContext = temporalInfo.containsTemporalRefs 
+        ? `, referring to temporal events: ${temporalInfo.temporalInfo.map(t => 
+            `"${t.originalText}" (${t.resolvedDate?.toLocaleDateString() || 'unresolved'})`
+          ).join(', ')}`
+        : '';
+      
+      enhancedContent = `${userContext} ${dateContext}: ${temporalInfo.processedContent}${temporalContext}`;
+      processedContent = temporalInfo.processedContent;
+      
+      // Collect temporal data for update
+      temporalData = {
+        temporal_info: temporalInfo.temporalInfo,
+        resolved_dates: temporalInfo.resolvedDates,
+        temporal_relevance_score: temporalInfo.temporalRelevanceScore,
+        contains_temporal_refs: temporalInfo.containsTemporalRefs,
+      };
+      
+      console.log(`📝 Updating temporally-aware embedding for: ${userName}`);
       embedding = await generateEmbedding(enhancedContent);
     }
 
-    const updateData: Record<string, unknown> = { ...updates };
+    const updateData: Record<string, unknown> = { ...updates, ...temporalData };
     if (embedding) {
       updateData.embedding = embedding;
       updateData.enhanced_content = enhancedContent;
+      updateData.processed_content = processedContent;
     }
 
     const { error } = await supabase
@@ -150,7 +209,7 @@ export async function updateWithEmbedding(
       throw new Error(`Failed to update embedding: ${error.message}`);
     }
     
-    console.log(`✅ Updated embedding with user context`);
+    console.log(`✅ Updated temporally-aware embedding`);
   } catch (error) {
     console.error('Error in updateWithEmbedding:', error);
     throw error;
