@@ -159,8 +159,18 @@ export async function processTemporalContent(
  * Find absolute dates in content using various patterns
  */
 // eslint-disable-next-line @typescript-eslint/no-unused-vars
-function findAbsoluteDates(content: string, _referenceDate: Date): Array<{originalText: string, resolvedDate: Date, confidence: number, temporalType: 'absolute'}> {
-  const results: Array<{originalText: string, resolvedDate: Date, confidence: number, temporalType: 'absolute'}> = [];
+function findAbsoluteDates(content: string, _referenceDate: Date): Array<{originalText: string, resolvedDate: Date, confidence: number, temporalType: 'absolute', recurringPattern?: TemporalInfo['recurringPattern']}> {
+  const results: Array<{originalText: string, resolvedDate: Date, confidence: number, temporalType: 'absolute', recurringPattern?: TemporalInfo['recurringPattern']}> = [];
+  
+  // Check if this content is about a birthday or other recurring event
+  const contentLower = content.toLowerCase();
+  const isBirthday = contentLower.includes('birthday') || contentLower.includes('born');
+  const isAnniversary = contentLower.includes('anniversary');
+  const isHoliday = contentLower.includes('holiday') || contentLower.includes('christmas') || 
+                    contentLower.includes('thanksgiving') || contentLower.includes('easter') ||
+                    contentLower.includes('valentine') || contentLower.includes('halloween');
+  
+  const isRecurringEvent = isBirthday || isAnniversary || isHoliday;
   
   // Common date patterns
   const datePatterns = [
@@ -178,11 +188,23 @@ function findAbsoluteDates(content: string, _referenceDate: Date): Array<{origin
         const parsedDate = new Date(dateStr);
         
         if (!isNaN(parsedDate.getTime()) && parsedDate.getFullYear() > 1900) {
+          let recurringPattern: TemporalInfo['recurringPattern'] | undefined;
+          
+          // If this is a birthday/anniversary/holiday, treat it as a yearly recurring event
+          if (isRecurringEvent) {
+            recurringPattern = {
+              frequency: 'yearly',
+              month: parsedDate.getMonth() + 1, // 1-12
+              dayOfMonth: parsedDate.getDate()
+            };
+          }
+          
           results.push({
             originalText: dateStr,
             resolvedDate: parsedDate,
             confidence: 0.9,
-            temporalType: 'absolute'
+            temporalType: 'absolute',
+            recurringPattern
           });
         }
       } catch {

@@ -226,29 +226,46 @@ const RESPONSE_PROMPT = `You are a temporally-aware AI assistant for managing sh
    - Never say an event "would have been" on a date when the temporal context clearly shows it's scheduled for that date
    - Focus on the RESOLVED DATE, not when it was stored
 
-2. **Correct Temporal Response Examples**:
+2. **RECURRING EVENTS (CRITICAL)**:
+   - **Birthdays** are ALWAYS recurring yearly events, even if only mentioned with a past date
+   - **Anniversaries** are ALWAYS recurring yearly events
+   - When someone asks "How many days until Sebastian's birthday?" and you see "Sebastian's birthday was on November 15, 2022":
+     - CORRECT: Calculate days until next November 15th (e.g., November 15, 2025)
+     - WRONG: Say "it has already passed" or dismiss as past event
+   - For birthdays/anniversaries, ALWAYS calculate the next occurrence from the current date
+   - Example: If today is May 30, 2025 and birthday was November 15, 2022 → next birthday is November 15, 2025
+
+3. **Correct Temporal Response Examples**:
    - Query: "When is the birthday?"
    - Context: "tomorrow" refers to Saturday, May 31, 2025
    - CORRECT: "The birthday is scheduled for Saturday, May 31, 2025."
    - WRONG: "The birthday would have been May 30th" (this is completely incorrect)
 
-3. **Temporal Status Guidelines**:
+4. **Recurring Event Examples**:
+   - Query: "How many days until Sebastian's birthday?"
+   - Context: Sebastian's birthday was on November 15, 2022
+   - CORRECT: "Sebastian's next birthday is November 15, 2025, which is 169 days from now."
+   - WRONG: "Sebastian's birthday was on November 15, 2022, which means it has already passed."
+
+5. **Temporal Status Guidelines**:
    - Past events: Use past tense ("The birthday was on...")
    - Future events: Use future tense ("The birthday is scheduled for...")
    - Today's events: Use present tense ("The birthday is today...")
+   - Recurring events: Calculate next occurrence ("The next birthday is...")
 
-4. **Smart Temporal Suggestions**:
-   - For expired events: "This event has passed. Would you like me to help you find current events?"
-   - For recurring events: "This happens every Monday. The next occurrence is January 22nd."
+6. **Smart Temporal Suggestions**:
+   - For expired one-time events: "This event has passed. Would you like me to help you find current events?"
+   - For recurring events: "The next occurrence is January 22nd (in 5 days)."
    - For future events: "This is scheduled for January 20th, which is in 3 days."
 
-5. **USER CONTEXT INTELLIGENCE**:
+7. **USER CONTEXT INTELLIGENCE**:
    - Each entry shows who added it (look for "Added by [Name]:" in the enhanced content)
    - When users ask about specific people ("What did Walter say about...", "Did John mention..."), prioritize entries from that person
    - Use this context to make intelligent connections and provide more personalized responses
 
-6. **Priority Rules**:
+8. **Priority Rules**:
    - ALWAYS use the resolved date from temporal context as the actual event date
+   - For recurring events, ALWAYS calculate next occurrence regardless of storage date
    - Current/future events take priority over past events
    - More recent information takes priority over older information
    - Recurring events maintain relevance regardless of storage date
@@ -263,7 +280,10 @@ const RESPONSE_PROMPT = `You are a temporally-aware AI assistant for managing sh
 - When referencing entries, show their tags and who added them: 🏷️ [wifi, password] by John: "The WiFi password is..."
 - For temporal content, provide clear temporal context: "This was scheduled for last Tuesday (3 days ago)"
 
-**REMEMBER**: The temporal context shows the ACTUAL resolved dates. If "tomorrow" resolves to May 31st, the event IS on May 31st, not some other date.
+**REMEMBER**: 
+- Birthdays and anniversaries are ALWAYS recurring yearly events
+- Never dismiss birthdays as "already passed" - calculate the next occurrence
+- The temporal context shows the ACTUAL resolved dates. If "tomorrow" resolves to May 31st, the event IS on May 31st, not some other date.
 
 Current date and time: ${new Date().toISOString()}`;
 
@@ -396,10 +416,46 @@ export async function generateResponse(
           const userMatch = enhancedContent.match(/^Added by ([^:]+):/);
           const userName = userMatch ? userMatch[1] : 'Someone';
           
-          // Add temporal context if available
+          // Add enhanced temporal context for recurring events
           let temporalContext = '';
           if (entry.temporalInfo && entry.temporalInfo.length > 0) {
-            temporalContext = ` ${createTemporalContext(entry.temporalInfo, entry.createdAt)}`;
+            // Check if this is a birthday or other recurring event
+            const isRecurringEvent = entry.content.toLowerCase().includes('birthday') || 
+                                   entry.content.toLowerCase().includes('anniversary') ||
+                                   entry.temporalInfo.some(t => t.recurringPattern);
+            
+            if (isRecurringEvent) {
+              // For recurring events, calculate next occurrence
+              const recurringTemporal = entry.temporalInfo.find(t => t.recurringPattern || 
+                                        entry.content.toLowerCase().includes('birthday') ||
+                                        entry.content.toLowerCase().includes('anniversary'));
+              
+              if (recurringTemporal && recurringTemporal.resolvedDate) {
+                // Calculate next occurrence for yearly events (birthdays/anniversaries)
+                const originalDate = recurringTemporal.resolvedDate;
+                const currentDate = new Date();
+                const currentYear = currentDate.getFullYear();
+                
+                // Try current year first, then next year
+                let nextOccurrence = new Date(currentYear, originalDate.getMonth(), originalDate.getDate());
+                if (nextOccurrence <= currentDate) {
+                  nextOccurrence = new Date(currentYear + 1, originalDate.getMonth(), originalDate.getDate());
+                }
+                
+                const daysUntil = Math.ceil((nextOccurrence.getTime() - currentDate.getTime()) / (1000 * 60 * 60 * 24));
+                const nextDateStr = nextOccurrence.toLocaleDateString('en-US', { 
+                  weekday: 'long', 
+                  year: 'numeric', 
+                  month: 'long', 
+                  day: 'numeric' 
+                });
+                
+                temporalContext = ` [RECURRING EVENT: Next occurrence is ${nextDateStr}, which is ${daysUntil} days from now]`;
+              }
+            } else {
+              // Regular temporal context for non-recurring events
+              temporalContext = ` ${createTemporalContext(entry.temporalInfo, entry.createdAt)}`;
+            }
           }
           
           return `🏷️ [${entry.tags.join(', ')}] by ${userName}: ${entry.content}${temporalContext}`;
