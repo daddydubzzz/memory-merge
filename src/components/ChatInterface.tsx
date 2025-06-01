@@ -4,6 +4,7 @@ import React, { useState, useRef, useEffect } from 'react';
 import { Send, MessageCircle, Sparkles } from 'lucide-react';
 import { useAuth } from '@/contexts/AuthContext';
 import { KnowledgeService } from '@/lib/knowledge';
+import { checkStorageConfidence, isStorageIntent } from '@/lib/storage-confidence';
 import type { KnowledgeEntry } from '@/lib/constants';
 
 interface Message {
@@ -61,6 +62,37 @@ export default function ChatInterface({ accountId }: ChatInterfaceProps) {
       }
       
       const processedQuery = await processResponse.json();
+      
+      // Check confidence thresholds before proceeding with storage
+      if (isStorageIntent(processedQuery.intent)) {
+        const confidenceCheck = checkStorageConfidence(processedQuery);
+        
+        if (!confidenceCheck.shouldProceed) {
+          // Handle low confidence with clarification request
+          console.log('🚫 Confidence too low:', confidenceCheck.reason);
+          
+          const clarificationMessage: Message = {
+            id: (Date.now() + 1).toString(),
+            content: confidenceCheck.clarificationPrompt || "I need more clarification to help you properly.",
+            isUser: false,
+            timestamp: new Date(),
+            suggestions: confidenceCheck.suggestions || [
+              "Try being more specific",
+              "Add more details",
+              "Rephrase your request"
+            ]
+          };
+          
+          setMessages(prev => [...prev, clarificationMessage]);
+          setIsLoading(false);
+          return; // Exit early, don't proceed with storage
+        }
+        
+        console.log('✅ Confidence check passed:', {
+          intent: processedQuery.intent,
+          confidence: Math.round(processedQuery.confidence * 100) + '%'
+        });
+      }
       
       if (processedQuery.intent === 'store' || processedQuery.intent === 'update' || processedQuery.intent === 'purchase' || processedQuery.intent === 'clear_list') {
         // Handle shopping list operations
